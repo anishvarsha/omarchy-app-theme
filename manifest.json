@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.anishvarsha.app-theme",
+  "name": "App themes",
+  "version": "0.1.0",
+  "author": "anishvarsha",
+  "description": "Choose the Omarchy theme for each app, or leave an app with its native look",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "App themes",
+    "description": "Per-app Omarchy themes, with a native option for browsers",
+    "category": "Appearance",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

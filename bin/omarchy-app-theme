@@ -1,0 +1,1146 @@
+#!/usr/bin/env bash
+
+# omarchy-app-theme -- per-app theme policy for Omarchy.
+#
+# Reads ~/.config/omarchy/app-theme/config.conf and makes each supported app
+# match it. Run automatically from the theme-set hook, so an app set to `off`
+# stays unthemed and an app set to a theme keeps that theme across switches.
+#
+# Usage:
+#   omarchy-app-theme list
+#   omarchy-app-theme set <app> <default|off|theme-slug>
+#   omarchy-app-theme get <app>
+#   omarchy-app-theme is <app> <value>
+#   omarchy-app-theme apply [--quiet]
+#   omarchy-app-theme verify
+
+set -u
+
+CONFIG_DIR="${OMARCHY_APP_THEME_DIR:-$HOME/.config/omarchy/app-theme}"
+CONFIG="$CONFIG_DIR/config.conf"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/app-theme"
+RENDER_DIR="$STATE_DIR/rendered"
+LOG="$STATE_DIR/app-theme.log"
+HELPER="/usr/local/bin/omarchy-app-theme-browser"
+CURRENT_THEME_DIR="$HOME/.local/state/omarchy/current/theme"
+
+APPS=(browser alacritty foot kitty ghostty btop helix vscode obsidian)
+TERMINALS=(alacritty foot kitty ghostty)
+declare -A CFG=()
+QUIET=0
+TOUCHED_TERMINAL=0
+
+mkdir -p "$STATE_DIR" 2>/dev/null || true
+
+log() {
+  [[ -n $LOG ]] || return 0
+  printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$LOG" 2>/dev/null || true
+}
+say() { (( QUIET )) || printf '%s\n' "$*"; }
+warn() {
+  printf 'omarchy-app-theme: %s\n' "$*" >&2
+  log "WARN: $*"
+}
+note_fail() {
+  (( QUIET )) && log "WARN: $*" || warn "$*"
+}
+trim() {
+  local value=$1
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+is_app() {
+  local app
+  for app in "${APPS[@]}" terminal; do
+    [[ $1 == "$app" ]] && return 0
+  done
+  return 1
+}
+
+normalize_value() {
+  local raw value
+  raw=$(trim "$1")
+  value=${raw,,}
+  case $value in
+    default | on | follow | omarchy | theme) printf 'default' ;;
+    off | native | none | disabled) printf 'off' ;;
+    *) printf '%s' "${value// /-}" ;;
+  esac
+}
+
+theme_dir() {
+  local dir
+  dir=$(omarchy-theme-dir "$1" 2>/dev/null) || return 1
+  [[ -n $dir ]] || return 1
+  printf '%s' "$dir"
+}
+
+valid_theme() {
+  local dir
+  [[ $1 =~ ^[a-z0-9][a-z0-9._-]*$ ]] || return 1
+  dir=$(theme_dir "$1") || return 1
+  [[ -d $dir && -f $dir/colors.toml ]]
+}
+
+config_load() {
+  CFG=()
+  [[ -f $CONFIG ]] || return 0
+
+  local line key value
+  while IFS= read -r line || [[ -n $line ]]; do
+    line=${line%%#*}
+    [[ $line =~ ^[[:space:]]*$ ]] && continue
+    [[ $line == *=* ]] || {
+      warn "config: ignoring '$(trim "$line")'"
+      continue
+    }
+
+    key=$(trim "${line%%=*}")
+    value=$(trim "${line#*=}")
+    key=${key,,}
+    [[ -n $key && -n $value ]] || continue
+
+    if [[ $key == terminal ]]; then
+      CFG[terminal]=$(normalize_value "$value")
+    elif is_app "$key"; then
+      CFG[$key]=$(normalize_value "$value")
+    else
+      warn "config: unknown app '$key'"
+    fi
+  done <"$CONFIG"
+}
+
+effective_value() {
+  local app=$1
+  if [[ $app == terminal ]]; then
+    printf '%s' "${CFG[terminal]:-default}"
+    return
+  fi
+  printf '%s' "${CFG[$app]:-${CFG[terminal]:-default}}"
+}
+
+app_label() {
+  case $1 in
+    browser) printf 'Browsers' ;;
+    alacritty) printf 'Alacritty' ;;
+    foot) printf 'Foot' ;;
+    kitty) printf 'Kitty' ;;
+    ghostty) printf 'Ghostty' ;;
+    btop) printf 'btop' ;;
+    helix) printf 'Helix' ;;
+    vscode) printf 'VS Code' ;;
+    obsidian) printf 'Obsidian' ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+app_present() {
+  case $1 in
+    browser)
+      command -v chromium >/dev/null 2>&1 ||
+        command -v chromium-browser >/dev/null 2>&1 ||
+        command -v google-chrome-stable >/dev/null 2>&1 ||
+        command -v microsoft-edge-stable >/dev/null 2>&1 ||
+        command -v brave >/dev/null 2>&1
+      ;;
+    alacritty) [[ -f $HOME/.config/alacritty/alacritty.toml ]] ;;
+    foot) [[ -f $HOME/.config/foot/foot.ini ]] ;;
+    kitty) [[ -f $HOME/.config/kitty/kitty.conf ]] ;;
+    ghostty) [[ -f $HOME/.config/ghostty/config ]] ;;
+    btop) [[ -f $HOME/.config/btop/btop.conf ]] ;;
+    helix) [[ -d $HOME/.config/helix ]] ;;
+    vscode)
+      local entry
+      for entry in "${VSCODE_VARIANTS[@]}"; do
+        vscode_present "${entry%%|*}" && return 0
+      done
+      return 1
+      ;;
+    obsidian) [[ -f $HOME/.config/obsidian/obsidian.json ]] ;;
+    *) return 1 ;;
+  esac
+}
+
+theme_slugs() {
+  local base entry
+  for base in "$HOME/.config/omarchy/themes" "${OMARCHY_PATH:-/usr/share/omarchy}/themes"; do
+    [[ -d $base ]] || continue
+    for entry in "$base"/*; do
+      [[ -e $entry && -d $entry ]] || continue
+      [[ -f $entry/colors.toml || -f $entry/alacritty.toml ]] || continue
+      printf '%s\n' "${entry##*/}"
+    done
+  done | sort -u
+}
+
+current_theme_name() {
+  local file="$HOME/.local/state/omarchy/current/theme.name"
+  [[ -f $file ]] && head -n1 "$file" || true
+}
+
+hook_path() {
+  printf '%s/.config/omarchy/hooks/theme-set.d/50-app-theme' "$HOME"
+}
+
+hook_installed() {
+  local hook
+  hook=$(hook_path)
+  [[ -f $hook ]] && grep -q 'Managed by omarchy-app-theme' "$hook" 2>/dev/null
+}
+
+resolve_value() {
+  local app=$1 value
+  value=$(normalize_value "$(effective_value "$app")")
+  if [[ $value == default || $value == off ]]; then
+    printf '%s' "$value"
+    return 0
+  fi
+  if valid_theme "$value"; then
+    printf '%s' "$value"
+    return 0
+  fi
+  note_fail "$app: theme '$value' not found; using default"
+  printf 'default'
+}
+
+# Render a theme's generated app files without touching the live theme state.
+# Uses Omarchy's own template renderer against a throwaway HOME.
+render_theme() {
+  local slug=$1 src dst lock roots tmp renderer rc=0
+  valid_theme "$slug" || {
+    warn "unknown theme '$slug'"
+    return 1
+  }
+
+  src=$(theme_dir "$slug")
+  dst="$RENDER_DIR/$slug"
+  mkdir -p "$RENDER_DIR"
+  lock="$RENDER_DIR/.$slug.lock"
+
+  exec 8>"$lock" || return 1
+  flock -w 20 8 || {
+    exec 8>&-
+    warn "timed out waiting for theme render lock ($slug)"
+    return 1
+  }
+
+  renderer="${OMARCHY_PATH:-/usr/share/omarchy}/bin/omarchy-theme-set-templates"
+  [[ -x $renderer ]] || renderer=$(command -v omarchy-theme-set-templates 2>/dev/null || true)
+
+  roots=("$src")
+  [[ -d $HOME/.config/omarchy/themed ]] && roots+=("$HOME/.config/omarchy/themed")
+  [[ -n $renderer && -f $renderer ]] && roots+=("$renderer")
+
+  if [[ -d $dst && -f $dst/colors.toml ]] &&
+    [[ -z $(find "${roots[@]}" -newer "$dst/colors.toml" -print -quit 2>/dev/null) ]]; then
+    flock -u 8
+    exec 8>&-
+    return 0
+  fi
+
+  tmp=$(mktemp -d "$STATE_DIR/.render-${slug}.XXXXXX") || {
+    flock -u 8
+    exec 8>&-
+    return 1
+  }
+
+  mkdir -p "$tmp/.local/state/omarchy/current/next-theme" "$tmp/.config/omarchy"
+  cp -a "$src/." "$tmp/.local/state/omarchy/current/next-theme/" || rc=1
+  if (( rc == 0 )) && [[ -d $HOME/.config/omarchy/themed ]]; then
+    cp -a "$HOME/.config/omarchy/themed" "$tmp/.config/omarchy/themed" || rc=1
+  fi
+
+  if (( rc == 0 )) && [[ -x ${renderer:-} ]]; then
+    HOME="$tmp" "$renderer" >>"$LOG" 2>&1 || rc=1
+  else
+    rc=1
+  fi
+
+  if (( rc == 0 )); then
+    rm -rf "$dst"
+    mv "$tmp/.local/state/omarchy/current/next-theme" "$dst"
+    # Only generated configs are needed; drop the bulky artwork.
+    rm -rf "$dst/backgrounds" "$dst"/preview*.png "$dst"/unlock.png
+    log "rendered theme '$slug'"
+  else
+    warn "failed to render theme '$slug' (see $LOG)"
+  fi
+
+  rm -rf "$tmp"
+  flock -u 8
+  exec 8>&-
+  (( rc == 0 ))
+}
+
+rgb_to_hex() {
+  local r g b
+  if [[ $1 =~ ^[[:space:]]*([0-9]{1,3})[[:space:]]*,[[:space:]]*([0-9]{1,3})[[:space:]]*,[[:space:]]*([0-9]{1,3})[[:space:]]*$ ]]; then
+    r=$((10#${BASH_REMATCH[1]}))
+    g=$((10#${BASH_REMATCH[2]}))
+    b=$((10#${BASH_REMATCH[3]}))
+    (( r < 256 && g < 256 && b < 256 )) || return 1
+    printf '%02x%02x%02x' "$r" "$g" "$b"
+    return 0
+  fi
+  return 1
+}
+
+# --- browser -------------------------------------------------------------
+
+browser_current_hex() {
+  local file="$CURRENT_THEME_DIR/chromium.theme"
+  if [[ -f $file ]] && rgb_to_hex "$(<"$file")"; then
+    return 0
+  fi
+  printf '1c2027'
+}
+
+browser_helper() {
+  if (( EUID == 0 )); then
+    "$HELPER" "$@"
+    return
+  fi
+  command -v sudo >/dev/null 2>&1 || return 1
+  sudo -n "$HELPER" "$@" 2>/dev/null
+}
+
+hint_privileged() {
+  local message="browser: privileged helper unavailable; run: sudo $CONFIG_DIR/install-privileged.sh"
+  note_fail "$message"
+}
+
+browser_refresh_one() {
+  local proc=$1 cmd=$2
+  command -v "$cmd" >/dev/null 2>&1 || return 0
+  pgrep -x "$proc" >/dev/null 2>&1 || return 0
+  "$cmd" --refresh-platform-policy --no-startup-window >/dev/null 2>&1 &
+}
+
+browser_refresh() {
+  browser_refresh_one chromium chromium
+  browser_refresh_one chrome google-chrome-stable
+  browser_refresh_one chrome google-chrome
+  browser_refresh_one msedge microsoft-edge-stable
+  browser_refresh_one brave brave
+  if [[ -x /opt/brave-origin-bin/brave ]] && pgrep -f '^/opt/brave-origin-bin/' >/dev/null 2>&1; then
+    /opt/brave-origin-bin/brave --refresh-platform-policy --no-startup-window >/dev/null 2>&1 &
+  fi
+}
+
+browser_apply() {
+  local mode=$1 theme=${2:-} hex
+
+  case $mode in
+    off)
+      browser_helper off || {
+        hint_privileged
+        return 1
+      }
+      ;;
+    default)
+      hex=$(browser_current_hex) || return 1
+      browser_helper set "$hex" || {
+        hint_privileged
+        return 1
+      }
+      ;;
+    *)
+      render_theme "$theme" >/dev/null || return 1
+      hex=$(rgb_to_hex "$(<"$RENDER_DIR/$theme/chromium.theme")") || {
+        warn "browser: theme '$theme' did not render a usable color"
+        return 1
+      }
+      browser_helper set "$hex" || {
+        hint_privileged
+        return 1
+      }
+      ;;
+  esac
+
+  browser_refresh
+}
+
+# --- terminals -----------------------------------------------------------
+
+term_conf() {
+  case $1 in
+    alacritty) printf '%s' "$HOME/.config/alacritty/alacritty.toml" ;;
+    foot) printf '%s' "$HOME/.config/foot/foot.ini" ;;
+    kitty) printf '%s' "$HOME/.config/kitty/kitty.conf" ;;
+    ghostty) printf '%s' "$HOME/.config/ghostty/config" ;;
+  esac
+}
+
+term_file() {
+  case $1 in
+    alacritty) printf 'alacritty.toml' ;;
+    foot) printf 'foot.ini' ;;
+    kitty) printf 'kitty.conf' ;;
+    ghostty) printf 'ghostty.conf' ;;
+  esac
+}
+
+term_line() {
+  case $1 in
+    alacritty) printf 'general.import = [ "%s" ]' "$2" ;;
+    foot) printf 'include=%s' "$2" ;;
+    kitty) printf 'include %s' "$2" ;;
+    ghostty) printf 'config-file = ?"%s"' "$2" ;;
+  esac
+}
+
+term_apply() {
+  local app=$1 mode=$2 theme=${3:-} conf file path line disabled regex tmp rc=0
+  conf=$(term_conf "$app")
+  file=$(term_file "$app")
+  [[ -f $conf ]] || return 0
+
+  case $mode in
+    off) path="" ;;
+    default) path="$CURRENT_THEME_DIR/$file" ;;
+    *)
+      path="$RENDER_DIR/$theme/$file"
+      [[ -f $path ]] || {
+        warn "$app: theme '$theme' did not render $file"
+        return 1
+      }
+      ;;
+  esac
+
+  line=$(term_line "$app" "$path")
+  disabled="# omarchy-app-theme-disabled $line"
+
+  if [[ $mode == off ]]; then
+    disabled="# omarchy-app-theme-disabled $line"
+  fi
+
+  file=${file//./[.]}
+  regex="(omarchy/current/theme/$file|omarchy/app-theme/rendered/[^/]+/$file|omarchy-app-theme-disabled)"
+
+  tmp=$(mktemp) || return 1
+  awk -v re="$regex" -v line="$line" -v disabled="$disabled" -v off="$mode" '
+    $0 ~ re {
+      if (off == "off") print disabled; else print line
+      found = 1
+      next
+    }
+    { print }
+    END { if (!found) exit 3 }
+  ' "$conf" >"$tmp" || rc=$?
+
+  if (( rc == 3 )); then
+    rm -f "$tmp"
+    log "$app: no Omarchy include line in $conf; leaving it alone"
+    return 0
+  elif (( rc != 0 )); then
+    rm -f "$tmp"
+    warn "$app: could not rewrite $conf"
+    return 1
+  fi
+
+  if cmp -s "$tmp" "$conf"; then
+    rm -f "$tmp"
+    return 0
+  fi
+
+  cat "$tmp" >"$conf" || {
+    rm -f "$tmp"
+    warn "$app: could not write $conf"
+    return 1
+  }
+  rm -f "$tmp"
+  TOUCHED_TERMINAL=1
+  log "$app: include -> ${path:-disabled}"
+}
+
+# --- btop ----------------------------------------------------------------
+
+btop_apply() {
+  local mode=$1 theme=${2:-} conf="$HOME/.config/btop/btop.conf"
+  local link="$HOME/.config/btop/themes/current.theme" source=""
+
+  [[ -f $conf ]] || return 0
+
+  case $mode in
+    off)
+      sed -i -E 's|^[[:space:]]*color_theme[[:space:]]*=.*|color_theme = "Default"|' "$conf" || return 1
+      ;;
+    default)
+      source="$CURRENT_THEME_DIR/btop.theme"
+      [[ -f $source ]] || return 0
+      sed -i -E 's|^[[:space:]]*color_theme[[:space:]]*=.*|color_theme = "current"|' "$conf" || return 1
+      mkdir -p "$(dirname "$link")"
+      ln -sfn "$source" "$link" || return 1
+      ;;
+    *)
+      source="$RENDER_DIR/$theme/btop.theme"
+      [[ -f $source ]] || {
+        warn "btop: theme '$theme' did not render btop.theme"
+        return 1
+      }
+      sed -i -E 's|^[[:space:]]*color_theme[[:space:]]*=.*|color_theme = "current"|' "$conf" || return 1
+      mkdir -p "$(dirname "$link")"
+      ln -sfn "$source" "$link" || return 1
+      ;;
+  esac
+
+  pgrep -x btop >/dev/null 2>&1 && pkill -SIGUSR2 btop 2>/dev/null
+  return 0
+}
+
+# --- helix ---------------------------------------------------------------
+
+helix_apply() {
+  local mode=$1 theme=${2:-} dir="$HOME/.config/helix"
+  local link="$dir/themes/omarchy.toml" conf="$dir/config.toml" source=""
+
+  [[ -d $dir ]] || return 0
+
+  case $mode in
+    off)
+      if [[ -f $conf ]] && grep -qE '^[[:space:]]*theme[[:space:]]*=[[:space:]]*"omarchy"' "$conf"; then
+        sed -i -E 's|^([[:space:]]*theme[[:space:]]*=[[:space:]]*)"omarchy"|\1"default"|' "$conf" || return 1
+      fi
+      ;;
+    default)
+      source="$CURRENT_THEME_DIR/helix.toml"
+      ;;
+    *)
+      source="$RENDER_DIR/$theme/helix.toml"
+      [[ -f $source ]] || {
+        warn "helix: theme '$theme' did not render helix.toml"
+        return 1
+      }
+      ;;
+  esac
+
+  if [[ $mode != off ]]; then
+    [[ -f $source ]] || return 0
+    mkdir -p "$dir/themes"
+    ln -sfn "$source" "$link" || return 1
+    if [[ -f $conf ]] && grep -qE '^[[:space:]]*theme[[:space:]]*=' "$conf"; then
+      sed -i -E 's|^([[:space:]]*theme[[:space:]]*=[[:space:]]*)"[^"]*"|\1"omarchy"|' "$conf" || return 1
+    fi
+  fi
+
+  pgrep -x helix >/dev/null 2>&1 && pkill -USR1 helix 2>/dev/null
+  return 0
+}
+
+# --- VS Code family ------------------------------------------------------
+
+VSCODE_VARIANTS=(
+  "code|$HOME/.config/Code/User/settings.json|$HOME/.vscode/extensions|skip-vscode-theme-changes"
+  "code-insiders|$HOME/.config/Code - Insiders/User/settings.json|$HOME/.vscode-insiders/extensions|skip-vscode-insiders-theme-changes"
+  "codium|$HOME/.config/VSCodium/User/settings.json|$HOME/.vscode-oss/extensions|skip-codium-theme-changes"
+  "/usr/bin/cursor|$HOME/.config/Cursor/User/settings.json|$HOME/.cursor/extensions|skip-cursor-theme-changes"
+)
+
+vscode_present() {
+  [[ -x $1 ]] || command -v "$1" >/dev/null 2>&1
+}
+
+vscode_set_theme() {
+  local settings=$1 name=$2 escaped
+  [[ -f $settings ]] || return 0
+
+  escaped=${name//\\/\\\\}
+  escaped=${escaped//&/\\&}
+  escaped=${escaped//|/\\|}
+
+  if ! grep -q '"workbench.colorTheme"' "$settings"; then
+    sed -i --follow-symlinks -E '0,/\{/{s/\{/{\ "workbench.colorTheme": "",/}' "$settings" || return 1
+  fi
+  sed -i --follow-symlinks -E \
+    "s|(\"workbench.colorTheme\"[[:space:]]*:[[:space:]]*\")[^\"]*(\")|\1$escaped\2|" \
+    "$settings" || return 1
+}
+
+vscode_remove_theme() {
+  local settings=$1
+  [[ -f $settings ]] || return 0
+  sed -i --follow-symlinks -E 's/"workbench\.colorTheme"[[:space:]]*:[^,}]*,?//' "$settings" || return 1
+}
+
+vscode_register_extension() {
+  local ext_dir=$1 extensions_file=$2
+  local ext_base relative tmp
+  ext_base=$(dirname "$ext_dir")
+  extensions_file="$ext_base/extensions.json"
+  relative=$(basename "$ext_dir")
+
+  [[ -f $extensions_file ]] || printf '[]\n' >"$extensions_file"
+
+  tmp=$(mktemp) || return 1
+  if jq \
+    --arg id "local.omarchy-app-theme" \
+    --arg version "1.0.0" \
+    --arg fs_path "$ext_dir" \
+    --arg external "file://$ext_dir" \
+    --arg relative "$relative" \
+    'map(select(.identifier.id != $id)) + [{
+      identifier: { id: $id },
+      version: $version,
+      location: {
+        "$mid": 1,
+        fsPath: $fs_path,
+        external: $external,
+        path: $fs_path,
+        scheme: "file"
+      },
+      relativeLocation: $relative
+    }]' "$extensions_file" >"$tmp"; then
+    mv "$tmp" "$extensions_file" || {
+      rm -f "$tmp"
+      return 1
+    }
+  else
+    rm -f "$tmp"
+    return 1
+  fi
+}
+
+vscode_override_label() {
+  local extbase=$1 theme=$2 ext src label ui_theme
+  ext="$extbase/omarchy-app-theme"
+  src="$RENDER_DIR/$theme/vscode-theme.json"
+  label="Omarchy (App: $theme)"
+
+  [[ -f $src ]] || return 1
+  ui_theme=$(jq -r '.type // "dark"' "$src" 2>/dev/null || printf 'dark')
+  [[ $ui_theme == light ]] && ui_theme=vs || ui_theme=vs-dark
+
+  mkdir -p "$ext/themes" || return 1
+  cp "$src" "$ext/themes/omarchy-app-theme.json" || return 1
+
+  cat >"$ext/package.json" <<EOF || return 1
+{
+  "name": "omarchy-app-theme",
+  "displayName": "Omarchy App Theme",
+  "description": "Per-app Omarchy color theme",
+  "publisher": "local",
+  "version": "1.0.0",
+  "engines": { "vscode": "^1.70.0" },
+  "categories": ["Themes"],
+  "contributes": {
+    "themes": [{
+      "label": "$label",
+      "uiTheme": "$ui_theme",
+      "path": "./themes/omarchy-app-theme.json"
+    }]
+  }
+}
+EOF
+
+  vscode_register_extension "$ext" "$extbase" || return 1
+  printf '%s' "$label"
+}
+
+vscode_apply() {
+  local mode=$1 theme=${2:-} entry cmd settings extbase skip label
+  local any=0
+
+  if [[ $mode == default ]]; then
+    # Let Omarchy's own script handle variants and its skip-* toggles.
+    omarchy-theme-set-vscode >/dev/null 2>&1 || true
+    return 0
+  fi
+
+  for entry in "${VSCODE_VARIANTS[@]}"; do
+    IFS='|' read -r cmd settings extbase skip <<<"$entry"
+    vscode_present "$cmd" || continue
+    any=1
+
+    if [[ $mode == off ]]; then
+      vscode_remove_theme "$settings" || {
+        warn "vscode: could not update $settings"
+        continue
+      }
+      continue
+    fi
+
+    label=$(vscode_override_label "$extbase" "$theme") || {
+      warn "vscode: could not install app theme for $cmd"
+      continue
+    }
+    vscode_set_theme "$settings" "$label" || {
+      warn "vscode: could not update $settings"
+      continue
+    }
+  done
+
+  (( any )) || return 0
+  return 0
+}
+
+vscode_clean_overrides() {
+  local entry cmd settings extbase skip ext_json tmp
+  for entry in "${VSCODE_VARIANTS[@]}"; do
+    IFS='|' read -r cmd settings extbase skip <<<"$entry"
+    rm -rf "$extbase/omarchy-app-theme"
+    ext_json="$(dirname "$extbase")/extensions.json"
+    [[ -f $ext_json ]] || continue
+    tmp=$(mktemp) || continue
+    if jq 'map(select((.identifier.id? // "") != "local.omarchy-app-theme"))' "$ext_json" >"$tmp" 2>/dev/null; then
+      mv "$tmp" "$ext_json" || rm -f "$tmp"
+    else
+      rm -f "$tmp"
+    fi
+  done
+}
+
+# --- Obsidian ------------------------------------------------------------
+
+obsidian_appearance_off() {
+  local appearance=$1 tmp
+  [[ -f $appearance ]] || return 0
+  [[ $(jq -r '.cssTheme // empty' "$appearance" 2>/dev/null) == Omarchy ]] || return 0
+
+  tmp=$(mktemp) || return 1
+  if jq 'del(.cssTheme)' "$appearance" >"$tmp" 2>/dev/null; then
+    mv "$tmp" "$appearance" || {
+      rm -f "$tmp"
+      return 1
+    }
+  else
+    rm -f "$tmp"
+    return 1
+  fi
+}
+
+obsidian_appearance_on() {
+  local appearance=$1 tmp
+  tmp=$(mktemp) || return 1
+  if [[ -f $appearance ]]; then
+    jq '.cssTheme = "Omarchy"' "$appearance" >"$tmp" 2>/dev/null || {
+      rm -f "$tmp"
+      return 1
+    }
+  else
+    printf '{"cssTheme": "Omarchy"}\n' >"$tmp" || {
+      rm -f "$tmp"
+      return 1
+    }
+  fi
+  mv "$tmp" "$appearance" || {
+    rm -f "$tmp"
+    return 1
+  }
+}
+
+obsidian_apply() {
+  local mode=$1 theme=${2:-} conf="$HOME/.config/obsidian/obsidian.json"
+  local source="" vault theme_dir
+
+  [[ -f $conf ]] || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+
+  case $mode in
+    off) source="" ;;
+    default) source="$CURRENT_THEME_DIR/obsidian.css" ;;
+    *)
+      source="$RENDER_DIR/$theme/obsidian.css"
+      [[ -f $source ]] || {
+        warn "obsidian: theme '$theme' did not render obsidian.css"
+        return 1
+      }
+      ;;
+  esac
+
+  while IFS= read -r vault; do
+    [[ -n $vault && -d $vault/.obsidian ]] || continue
+    theme_dir="$vault/.obsidian/themes/Omarchy"
+
+    if [[ $mode == off ]]; then
+      rm -rf "$theme_dir"
+      obsidian_appearance_off "$vault/.obsidian/appearance.json" || true
+      continue
+    fi
+
+    [[ -f $source ]] || continue
+    mkdir -p "$theme_dir"
+    if [[ ! -f $theme_dir/manifest.json ]]; then
+      cat >"$theme_dir/manifest.json" <<'EOF'
+{
+  "name": "Omarchy",
+  "version": "1.0.0",
+  "minAppVersion": "0.16.0",
+  "description": "Synced with the Omarchy theme",
+  "author": "Omarchy",
+  "authorUrl": "https://omarchy.org"
+}
+EOF
+    fi
+    cp "$source" "$theme_dir/theme.css" || {
+      warn "obsidian: could not update $theme_dir"
+      continue
+    }
+    obsidian_appearance_on "$vault/.obsidian/appearance.json" || {
+      warn "obsidian: could not select the theme in $vault"
+    }
+  done < <(jq -r '.vaults | values[].path' "$conf" 2>/dev/null)
+}
+
+# --- dispatch ------------------------------------------------------------
+
+apply_one() {
+  local app=$1 value=$2 theme=""
+  case $value in
+    default | off) ;;
+    *) theme=$value ;;
+  esac
+
+  case $app in
+    browser) browser_apply "$value" "$theme" ;;
+    alacritty | foot | kitty | ghostty) term_apply "$app" "$value" "$theme" ;;
+    btop) btop_apply "$value" "$theme" ;;
+    helix) helix_apply "$value" "$theme" ;;
+    vscode) vscode_apply "$value" "$theme" ;;
+    obsidian) obsidian_apply "$value" "$theme" ;;
+    *)
+      warn "unknown app '$app'"
+      return 1
+      ;;
+  esac
+}
+
+apply_all() {
+  local app value
+  TOUCHED_TERMINAL=0
+  config_load
+
+  for app in "${APPS[@]}"; do
+    value=$(resolve_value "$app")
+    apply_one "$app" "$value" || note_fail "$app: failed to apply '$value'"
+  done
+
+  if (( TOUCHED_TERMINAL )); then
+    omarchy-restart-terminal >/dev/null 2>&1 || true
+  fi
+}
+
+config_write() {
+  local app=$1 value=$2
+  mkdir -p "$CONFIG_DIR" || return 1
+  touch "$CONFIG" || return 1
+
+  if grep -qE "^[[:space:]]*$app[[:space:]]*=" "$CONFIG"; then
+    sed -i -E "s|^[[:space:]]*($app)[[:space:]]*=.*|\1=$value|" "$CONFIG" || return 1
+  else
+    printf '%s=%s\n' "$app" "$value" >>"$CONFIG" || return 1
+  fi
+}
+
+config_reset() {
+  mkdir -p "$CONFIG_DIR" || return 1
+  cat >"$CONFIG" <<'EOF'
+# omarchy-app-theme -- per-app theme policy
+#
+# Values:
+#   default      follow the current Omarchy theme (Omarchy's normal behavior)
+#   off          leave the app with its own native look (no Omarchy theme)
+#   <theme-slug> apply that Omarchy theme to this app only
+#
+# App names: browser, alacritty, foot, kitty, ghostty, btop, helix, vscode,
+# obsidian. The special `terminal` line applies to all four terminals; a
+# per-terminal line overrides it.
+#
+# This is the Omarchy default: every app follows the current theme. Change a
+# line and run `omarchy-app-theme apply`, or use the widget / `set`.
+
+browser=default
+alacritty=default
+foot=default
+kitty=default
+ghostty=default
+btop=default
+helix=default
+vscode=default
+obsidian=default
+EOF
+}
+
+cmd_reset() {
+  local app
+
+  if (( $# > 0 )); then
+    for app in "$@"; do
+      cmd_set "$app" default || return
+    done
+    return
+  fi
+
+  config_reset || {
+    warn "could not write $CONFIG"
+    return 1
+  }
+  rm -rf "$RENDER_DIR"/* 2>/dev/null || true
+  vscode_clean_overrides
+  config_load
+  apply_all
+  say "reset all apps to Omarchy defaults"
+}
+
+cmd_install_hook() {
+  local hook engine
+  hook=$(hook_path)
+  engine=$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")
+  mkdir -p "$(dirname "$hook")" || return 1
+  {
+    printf '#!/bin/bash\n'
+    printf '# Managed by omarchy-app-theme. Remove with: omarchy-app-theme remove-hook\n'
+    printf 'engine=%q\n' "$engine"
+    printf '[[ -x $engine ]] || exit 0\n'
+    printf 'exec "$engine" apply --quiet\n'
+  } >"$hook" || return 1
+  chmod 755 "$hook" || return 1
+  say "installed theme-set hook: $hook"
+}
+
+cmd_remove_hook() {
+  local hook
+  hook=$(hook_path)
+  if [[ -f $hook ]] && grep -q 'Managed by omarchy-app-theme' "$hook" 2>/dev/null; then
+    rm -f "$hook"
+    say "removed theme-set hook: $hook"
+  else
+    say "no managed theme-set hook found"
+  fi
+}
+
+cmd_json() {
+  local app value installed present apps='[]' themes helper=false hook=false
+  command -v jq >/dev/null 2>&1 || {
+    warn "jq is required for JSON output"
+    return 1
+  }
+
+  config_load
+  for app in "${APPS[@]}"; do
+    value=$(normalize_value "$(effective_value "$app")")
+    installed=false
+    app_present "$app" && installed=true
+    apps=$(jq \
+      --arg id "$app" \
+      --arg label "$(app_label "$app")" \
+      --arg value "$value" \
+      --argjson installed "$installed" \
+      '. + [{ id: $id, label: $label, value: $value, installed: $installed }]' <<<"$apps") || return 1
+  done
+  themes=$(theme_slugs | jq -R . | jq -s .) || return 1
+  [[ -x $HELPER ]] && helper=true
+  hook_installed && hook=true
+
+  jq -n \
+    --arg currentTheme "$(current_theme_name)" \
+    --arg config "$CONFIG" \
+    --argjson apps "$apps" \
+    --argjson themes "$themes" \
+    --argjson helper "$helper" \
+    --argjson hook "$hook" \
+    '{ currentTheme: $currentTheme, config: $config, apps: $apps, themes: $themes, helper: $helper, hook: $hook }'
+}
+
+cmd_uninstall() {
+  local purge=0
+  [[ ${1:-} == --purge ]] && purge=1
+
+  cmd_reset
+  cmd_remove_hook
+
+  if (( purge )); then
+    rm -rf "$CONFIG_DIR" "$STATE_DIR"
+    say "removed $CONFIG_DIR and $STATE_DIR"
+  fi
+
+  cat <<EOF
+
+System files (only needed if you want to remove browser control):
+  sudo rm -f /usr/local/bin/omarchy-app-theme-browser
+  sudo rm -f /etc/sudoers.d/omarchy-app-theme-browser
+
+If you installed the terminal command:
+  rm -f ~/.local/bin/omarchy-app-theme
+EOF
+}
+
+usage() {
+  cat <<'EOF'
+Usage:
+  omarchy-app-theme list
+  omarchy-app-theme set <app> <default|off|theme-slug>
+  omarchy-app-theme get <app>
+  omarchy-app-theme is <app> <value>
+  omarchy-app-theme apply [--quiet]
+  omarchy-app-theme reset [app...]
+  omarchy-app-theme json
+  omarchy-app-theme themes
+  omarchy-app-theme install-hook | remove-hook
+  omarchy-app-theme verify
+  omarchy-app-theme uninstall [--purge]
+
+Apps:
+  browser, alacritty, foot, kitty, ghostty, btop, helix, vscode, obsidian
+  (the special app "terminal" sets all four terminals)
+
+Values:
+  default            follow the current Omarchy theme
+  off                leave the app unthemed (native look)
+  <theme-slug>       apply that Omarchy theme to this app only
+EOF
+}
+
+cmd_list() {
+  local app
+  config_load
+  printf '%-12s %s\n' APP VALUE
+  for app in "${APPS[@]}"; do
+    printf '%-12s %s\n' "$app" "$(normalize_value "$(effective_value "$app")")"
+  done
+  printf '%-12s %s\n' terminal "$(normalize_value "${CFG[terminal]:-default}")"
+}
+
+cmd_get() {
+  local app=$1
+  is_app "$app" || {
+    warn "unknown app '$app'"
+    return 2
+  }
+  config_load
+  normalize_value "$(effective_value "$app")"
+}
+
+cmd_is() {
+  local app=$1 expected actual
+  is_app "$app" || return 2
+  expected=$(normalize_value "$2")
+  config_load
+  actual=$(normalize_value "$(effective_value "$app")")
+  [[ $actual == "$expected" ]]
+}
+
+cmd_set() {
+  local app=$1 value=$2 normalized t
+
+  is_app "$app" || {
+    warn "unknown app '$app' (try: omarchy-app-theme list)"
+    return 2
+  }
+
+  normalized=$(normalize_value "$value")
+  if [[ $normalized != default && $normalized != off ]] && ! valid_theme "$normalized"; then
+    warn "unknown theme '$value'"
+    return 2
+  fi
+
+  config_write "$app" "$normalized" || {
+    warn "could not write $CONFIG"
+    return 1
+  }
+  config_load
+
+  TOUCHED_TERMINAL=0
+  if [[ $app == terminal ]]; then
+    for t in "${TERMINALS[@]}"; do
+      apply_one "$t" "$(resolve_value "$t")" || note_fail "$t: failed to apply"
+    done
+    if (( TOUCHED_TERMINAL )); then
+      omarchy-restart-terminal >/dev/null 2>&1 || true
+    fi
+  else
+    apply_one "$app" "$normalized" || note_fail "$app: failed to apply '$normalized'"
+  fi
+
+  say "$app -> $normalized"
+}
+
+cmd_verify() {
+  local dir file app
+  config_load
+
+  printf 'config: %s\n' "$CONFIG"
+  for app in "${APPS[@]}"; do
+    printf '%-12s %s\n' "$app" "$(resolve_value "$app")"
+  done
+
+  printf '\nbrowser policy files:\n'
+  for dir in /etc/chromium/policies/managed /etc/opt/chrome/policies/managed \
+    /etc/opt/edge/policies/managed /etc/brave/policies/managed; do
+    [[ -d $dir ]] || continue
+    file="$dir/color.json"
+    if [[ -f $file ]]; then
+      printf '  %s -> %s\n' "$file" "$(<"$file")"
+    else
+      printf '  %s (absent)\n' "$file"
+    fi
+  done
+
+  printf '\nprivileged helper: '
+  if [[ -x $HELPER ]]; then printf '%s\n' "$HELPER"; else printf 'missing (run install-privileged.sh)\n'; fi
+}
+
+main() {
+  local command=${1:-}
+  (( $# > 0 )) && shift || true
+
+  case $command in
+    apply)
+      [[ ${1:-} == --quiet ]] && QUIET=1
+      apply_all
+      ;;
+    set)
+      (( $# >= 2 )) || {
+        usage >&2
+        exit 2
+      }
+      cmd_set "$1" "$2"
+      ;;
+    get)
+      (( $# >= 1 )) || {
+        usage >&2
+        exit 2
+      }
+      cmd_get "$1"
+      ;;
+    is)
+      (( $# >= 2 )) || exit 2
+      cmd_is "$1" "$2"
+      ;;
+    list | status)
+      cmd_list
+      ;;
+    json)
+      cmd_json
+      ;;
+    themes)
+      theme_slugs
+      ;;
+    reset)
+      cmd_reset "$@"
+      ;;
+    install-hook)
+      cmd_install_hook
+      ;;
+    remove-hook)
+      cmd_remove_hook
+      ;;
+    uninstall)
+      cmd_uninstall "${1:-}"
+      ;;
+    verify)
+      cmd_verify
+      ;;
+    help | -h | --help | '')
+      usage
+      ;;
+    *)
+      warn "unknown command '$command'"
+      usage >&2
+      exit 2
+      ;;
+  esac
+}
+
+main "$@"

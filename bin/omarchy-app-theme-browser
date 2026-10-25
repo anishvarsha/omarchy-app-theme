@@ -1,0 +1,78 @@
+#!/bin/bash
+
+# omarchy-app-theme-browser -- root half of the browser adapter.
+#
+# Installed root-owned at /usr/local/bin/omarchy-app-theme-browser and reached
+# through a narrow NOPASSWD sudo rule. It only ever touches the fixed policy
+# directories below, and "set" accepts nothing but six lowercase hex digits.
+
+set -euo pipefail
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin
+
+POLICY_DIRS=(
+  /etc/chromium/policies/managed
+  /etc/opt/chrome/policies/managed
+  /etc/opt/edge/policies/managed
+  /etc/brave/policies/managed
+)
+
+usage() {
+  echo "Usage: omarchy-app-theme-browser off | set <rrggbb>" >&2
+  exit 2
+}
+
+(( EUID == 0 )) || {
+  echo "omarchy-app-theme-browser: must run as root" >&2
+  exit 1
+}
+(( $# >= 1 )) || usage
+
+case $1 in
+  off)
+    (( $# == 1 )) || usage
+    rc=0
+    for dir in "${POLICY_DIRS[@]}"; do
+      [[ -d $dir && ! -L $dir ]] || continue
+      rm -f -- "$dir/color.json" || rc=1
+    done
+    exit "$rc"
+    ;;
+  set)
+    (( $# == 2 )) || usage
+    hex=$2
+    [[ $hex =~ ^[0-9a-f]{6}$ ]] || {
+      echo "omarchy-app-theme-browser: expected six lowercase hex digits" >&2
+      exit 2
+    }
+
+    rc=0
+    staged=""
+    cleanup() {
+      [[ -z ${staged:-} ]] || rm -f "$staged"
+    }
+    trap cleanup EXIT
+
+    for dir in "${POLICY_DIRS[@]}"; do
+      [[ -d $dir && ! -L $dir ]] || continue
+
+      staged=$(mktemp) || {
+        rc=1
+        continue
+      }
+      printf '{"BrowserThemeColor": "#%s", "BrowserColorScheme": "device"}\n' "$hex" >"$staged"
+
+      if [[ -L ${dir}/color.json || -d ${dir}/color.json ]]; then
+        rm -rf -- "${dir}/color.json" || true
+      fi
+      install -m 0644 -o root -g root -T "$staged" "$dir/color.json" || rc=1
+
+      rm -f "$staged"
+      staged=""
+    done
+    exit "$rc"
+    ;;
+  *)
+    usage
+    ;;
+esac
