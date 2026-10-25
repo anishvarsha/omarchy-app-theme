@@ -185,9 +185,12 @@ hook_path() {
 }
 
 hook_installed() {
-  local hook
+  local hook engine
   hook=$(hook_path)
-  [[ -f $hook ]] && grep -q 'Managed by omarchy-app-theme' "$hook" 2>/dev/null
+  engine=$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")
+  [[ -f $hook ]] &&
+    grep -q 'Managed by omarchy-app-theme' "$hook" 2>/dev/null &&
+    grep -Fq "engine=$engine" "$hook" 2>/dev/null
 }
 
 resolve_value() {
