@@ -32,9 +32,9 @@ Omarchy.
 - **Reset:** one click restores every app to Omarchy defaults. This also
   restores Omarchy’s browser policy; choose **Native** for browsers afterward if
   you want to keep them unmanaged.
-- **Bar widget:** click the brush icon, press `Super + Shift + A`, or run
+- **Bar widget:** click the brush icon or run
   `omarchy-shell shell toggle io.github.anishvarsha.app-theme` to change an
-  app, pick a theme, or reset.
+  app, pick a theme, or reset. An optional Super shortcut is documented below.
 
 ## Install
 
@@ -76,9 +76,21 @@ for per-app themes to survive theme switches. To also get the
 ln -s ~/.config/omarchy/plugins/io.github.anishvarsha.app-theme/bin/omarchy-app-theme ~/.local/bin/omarchy-app-theme
 ```
 
+### Optional Super shortcut
+
+The plugin does not edit your Hyprland bindings automatically. To open it with
+`Super + Shift + A`, add this to `~/.config/hypr/bindings.lua`:
+
+```lua
+o.bind("SUPER + SHIFT + A", "App themes", "omarchy-shell shell toggle io.github.anishvarsha.app-theme")
+```
+
+Then run `hyprctl reload`.
+
 ## Use
 
-Click the brush in the bar, or press `Super + Shift + A`:
+Click the brush in the bar, or run
+`omarchy-shell shell toggle io.github.anishvarsha.app-theme`:
 
 - **Search** — type in the search box to filter all installed apps. Files and
   other apps without an adapter are listed under **Other installed apps** and
