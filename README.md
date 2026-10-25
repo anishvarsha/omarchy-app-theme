@@ -34,7 +34,7 @@ Omarchy.
   you want to keep them unmanaged.
 - **Bar widget:** click the brush icon or run
   `omarchy-shell shell toggle io.github.anishvarsha.app-theme` to change an
-  app, pick a theme, or reset. An optional Super shortcut is documented below.
+  app, pick a theme, or reset.
 
 ## Install
 
@@ -75,17 +75,6 @@ for per-app themes to survive theme switches. To also get the
 ```sh
 ln -s ~/.config/omarchy/plugins/io.github.anishvarsha.app-theme/bin/omarchy-app-theme ~/.local/bin/omarchy-app-theme
 ```
-
-### Optional Super shortcut
-
-The plugin does not edit your Hyprland bindings automatically. To open it with
-`Super + Shift + A`, add this to `~/.config/hypr/bindings.lua`:
-
-```lua
-o.bind("SUPER + SHIFT + A", "App themes", "omarchy-shell shell toggle io.github.anishvarsha.app-theme")
-```
-
-Then run `hyprctl reload`.
 
 ## Use
 
