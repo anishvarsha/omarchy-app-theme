@@ -645,6 +645,13 @@ vscode_apply() {
   local mode=$1 theme=${2:-} entry cmd settings extbase skip label
   local any=0
 
+  # Drop a previous per-app theme extension before switching back to Omarchy
+  # or native. Otherwise VS Code keeps a stale "Omarchy (App: …)" entry in its
+  # theme picker after the override is gone.
+  if [[ $mode == default || $mode == off ]]; then
+    vscode_clean_overrides
+  fi
+
   if [[ $mode == default ]]; then
     # Let Omarchy's own script handle variants and its skip-* toggles.
     omarchy-theme-set-vscode >/dev/null 2>&1 || true
@@ -683,7 +690,7 @@ vscode_clean_overrides() {
   for entry in "${VSCODE_VARIANTS[@]}"; do
     IFS='|' read -r cmd settings extbase skip <<<"$entry"
     rm -rf "$extbase/omarchy-app-theme"
-    ext_json="$(dirname "$extbase")/extensions.json"
+    ext_json="$extbase/extensions.json"
     [[ -f $ext_json ]] || continue
     tmp=$(mktemp) || continue
     if jq 'map(select((.identifier.id? // "") != "local.omarchy-app-theme"))' "$ext_json" >"$tmp" 2>/dev/null; then

@@ -23,6 +23,7 @@ Panel {
   property string errorText: ""
   property string view: "apps"
   property string selectedApp: ""
+  property string themeQuery: ""
   property int cursorIndex: -1
   property bool hookAttempted: false
 
@@ -34,6 +35,15 @@ Panel {
     for (var i = 0; i < apps.length; i++)
       if (apps[i].id === selectedApp) return apps[i]
     return null
+  }
+  readonly property var filteredThemes: {
+    var all = status.themes || []
+    var query = themeQuery.trim().toLowerCase()
+    if (query === "") return all
+    return all.filter(function(slug) {
+      return String(slug).toLowerCase().indexOf(query) !== -1 ||
+        themeLabel(slug).toLowerCase().indexOf(query) !== -1
+    })
   }
 
   function refresh() {
@@ -74,6 +84,7 @@ Panel {
   function openApp(id) {
     if (actionProc.running) return
     selectedApp = id
+    themeQuery = ""
     view = "detail"
     errorText = ""
   }
@@ -82,6 +93,7 @@ Panel {
     if (actionProc.running) return
     view = "apps"
     selectedApp = ""
+    themeQuery = ""
     cursorIndex = -1
   }
 
@@ -512,6 +524,36 @@ Panel {
             fontFamily: root.bar.fontFamily
           }
 
+          TextField {
+            id: themeSearch
+            width: parent.width
+            placeholderText: "Search " + root.filteredThemes.length + " themes…"
+            foreground: root.bar.foreground
+            accent: Color.accent
+            font.family: root.bar.fontFamily
+            text: root.themeQuery
+            onTextChanged: root.themeQuery = text
+            Keys.onEscapePressed: function(event) {
+              if (root.themeQuery !== "") root.themeQuery = ""
+              else root.backToApps()
+              event.accepted = true
+            }
+            Keys.onReturnPressed: function(event) {
+              if (root.filteredThemes.length > 0)
+                root.runSet(root.selectedApp, root.filteredThemes[0])
+              event.accepted = true
+            }
+          }
+
+          Text {
+            visible: root.filteredThemes.length === 0
+            text: "No themes match “" + root.themeQuery + "”."
+            color: Qt.darker(root.bar.foreground, 1.4)
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            width: parent.width
+          }
+
           Flickable {
             width: parent.width
             height: Math.min(themeGrid.implicitHeight, Style.space(230))
@@ -528,7 +570,7 @@ Panel {
               readonly property real cellWidth: (width - spacing * (columns - 1)) / columns
 
               Repeater {
-                model: root.status.themes || []
+                model: root.filteredThemes
                 Button {
                   required property var modelData
                   width: themeGrid.cellWidth
