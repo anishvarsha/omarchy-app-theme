@@ -13,8 +13,8 @@ Omarchy.
 
 - **Per-app choice:** follow the current Omarchy theme, use the app's native
   look, or pin a different Omarchy theme to that one app.
-- **Search:** filter the theme list by name instead of scrolling through all of
-  them.
+- **Search:** filter the app list or theme list by name instead of scrolling
+  through all of them.
 - **Browsers:** controls Chromium, Google Chrome, Microsoft Edge, and Brave.
   Native mode removes the `BrowserThemeColor` policy that triggers Chrome’s
   “set by your organization” message.

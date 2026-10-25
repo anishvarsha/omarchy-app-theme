@@ -23,6 +23,7 @@ Panel {
   property string errorText: ""
   property string view: "apps"
   property string selectedApp: ""
+  property string appQuery: ""
   property string themeQuery: ""
   property int cursorIndex: -1
   property bool hookAttempted: false
@@ -35,6 +36,15 @@ Panel {
     for (var i = 0; i < apps.length; i++)
       if (apps[i].id === selectedApp) return apps[i]
     return null
+  }
+  readonly property var filteredApps: {
+    var query = appQuery.trim().toLowerCase()
+    if (query === "") return apps
+    return apps.filter(function(app) {
+      return String(app.id).toLowerCase().indexOf(query) !== -1 ||
+        String(app.label).toLowerCase().indexOf(query) !== -1 ||
+        appKeywords(app.id).toLowerCase().indexOf(query) !== -1
+    })
   }
   readonly property var filteredThemes: {
     var all = status.themes || []
@@ -64,6 +74,21 @@ Panel {
     if (!value || value === "default") return "Omarchy"
     if (value === "off") return "Native"
     return themeLabel(value)
+  }
+
+  function appKeywords(id) {
+    switch (id) {
+      case "browser": return "chrome chromium edge brave web"
+      case "alacritty": return "terminal term"
+      case "foot": return "terminal term"
+      case "kitty": return "terminal term"
+      case "ghostty": return "terminal term"
+      case "btop": return "system monitor resources cpu"
+      case "helix": return "editor hx text"
+      case "vscode": return "code cursor vscodium insiders editor text"
+      case "obsidian": return "notes markdown editor text"
+      default: return ""
+    }
   }
 
   function appIcon(id) {
@@ -132,15 +157,21 @@ Panel {
   }
 
   function moveCursor(step) {
-    if (view !== "apps" || apps.length === 0) return
+    if (view !== "apps" || filteredApps.length === 0) return
     if (cursorIndex < 0) cursorIndex = 0
-    else cursorIndex = Math.max(0, Math.min(apps.length - 1, cursorIndex + step))
+    else cursorIndex = Math.max(0, Math.min(filteredApps.length - 1, cursorIndex + step))
+  }
+
+  onAppQueryChanged: {
+    cursorIndex = filteredApps.length > 0 && appQuery !== "" ? 0 : -1
   }
 
   onOpenedChanged: {
     if (opened) {
       refresh()
       errorText = ""
+      appQuery = ""
+      cursorIndex = -1
       if (view === "detail" && !selectedInfo) backToApps()
     }
   }
@@ -272,8 +303,8 @@ Panel {
         root.moveCursor(dx !== 0 ? dx : dy)
       }
       onActivateRequested: {
-        if (root.view === "apps" && root.cursorIndex >= 0 && root.cursorIndex < root.apps.length)
-          root.openApp(root.apps[root.cursorIndex].id)
+        if (root.view === "apps" && root.cursorIndex >= 0 && root.cursorIndex < root.filteredApps.length)
+          root.openApp(root.filteredApps[root.cursorIndex].id)
         else if (root.view === "detail" && root.selectedApp !== "")
           root.runSet(root.selectedApp, "default")
       }
@@ -366,8 +397,48 @@ Panel {
             font.pixelSize: Style.font.bodySmall
           }
 
+          TextField {
+            id: appSearch
+            visible: root.apps.length > 0
+            width: parent.width
+            placeholderText: "Search " + root.apps.length + " apps…"
+            foreground: root.bar.foreground
+            accent: Color.accent
+            font.family: root.bar.fontFamily
+            text: root.appQuery
+            onTextChanged: root.appQuery = text
+            Keys.onEscapePressed: function(event) {
+              if (root.appQuery !== "") root.appQuery = ""
+              else root.close()
+              event.accepted = true
+            }
+            Keys.onReturnPressed: function(event) {
+              if (root.filteredApps.length > 0)
+                root.openApp(root.filteredApps[0].id)
+              event.accepted = true
+            }
+            Keys.onDownPressed: function(event) {
+              root.moveCursor(1)
+              event.accepted = true
+            }
+            Keys.onUpPressed: function(event) {
+              root.moveCursor(-1)
+              event.accepted = true
+            }
+          }
+
+          Text {
+            visible: root.apps.length > 0 && root.filteredApps.length === 0
+            text: "No apps match “" + root.appQuery + "”."
+            color: root.bar.foreground
+            opacity: 0.6
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            width: parent.width
+          }
+
           Repeater {
-            model: root.apps
+            model: root.filteredApps
             Button {
               required property var modelData
               required property int index
