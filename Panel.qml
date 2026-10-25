@@ -37,6 +37,14 @@ Panel {
       if (apps[i].id === selectedApp) return apps[i]
     return null
   }
+  readonly property string targetApp: view === "all" ? "all" : selectedApp
+  readonly property string allValue: {
+    if (apps.length === 0) return "default"
+    var first = apps[0].value
+    for (var i = 1; i < apps.length; i++)
+      if (apps[i].value !== first) return ""
+    return first
+  }
   readonly property var filteredApps: {
     var query = appQuery.trim().toLowerCase()
     if (query === "") return apps
@@ -85,6 +93,8 @@ Panel {
       case "ghostty": return "terminal term"
       case "btop": return "system monitor resources cpu"
       case "helix": return "editor hx text"
+      case "nvim": return "neovim vim editor text code"
+      case "tmux": return "terminal multiplexer term"
       case "vscode": return "code cursor vscodium insiders editor text"
       case "obsidian": return "notes markdown editor text"
       default: return ""
@@ -100,6 +110,8 @@ Panel {
       case "ghostty": return "󰆍"
       case "btop": return "󰍛"
       case "helix": return "󰽎"
+      case "nvim": return ""
+      case "tmux": return "󰆍"
       case "vscode": return "󰨞"
       case "obsidian": return "󱓷"
       default: return "󰏘"
@@ -114,6 +126,14 @@ Panel {
     errorText = ""
   }
 
+  function openAll() {
+    if (actionProc.running) return
+    selectedApp = ""
+    themeQuery = ""
+    view = "all"
+    errorText = ""
+  }
+
   function backToApps() {
     if (actionProc.running) return
     view = "apps"
@@ -125,7 +145,7 @@ Panel {
   function runSet(app, value) {
     if (actionProc.running) return
     errorText = ""
-    busyText = "Applying " + valueLabel(value) + " to " + (app === "browser" ? "browsers" : app) + "…"
+    busyText = "Applying " + valueLabel(value) + " to " + (app === "browser" ? "browsers" : app === "all" ? "all apps" : app) + "…"
     actionProc.command = [root.script, "set", app, value]
     actionProc.running = true
   }
@@ -309,7 +329,7 @@ Panel {
           root.runSet(root.selectedApp, "default")
       }
       onCloseRequested: {
-        if (root.view === "detail") root.backToApps()
+        if (root.view === "detail" || root.view === "all") root.backToApps()
         else root.close()
       }
       onTabRequested: function(direction) { root.switchPanel(direction) }
@@ -328,7 +348,9 @@ Panel {
 
           Text {
             id: heroIcon
-            text: root.view === "detail" ? root.appIcon(root.selectedApp) : "󰏘"
+            text: root.view === "detail"
+              ? root.appIcon(root.selectedApp)
+              : root.view === "all" ? "󰀻" : "󰏘"
             color: root.bar.foreground
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.display
@@ -347,7 +369,7 @@ Panel {
             Text {
               text: root.view === "detail" && root.selectedInfo
                 ? root.selectedInfo.label
-                : "App themes"
+                : root.view === "all" ? "All apps" : "App themes"
               color: root.bar.foreground
               font.family: root.bar.fontFamily
               font.pixelSize: Style.font.title
@@ -425,6 +447,20 @@ Panel {
               root.moveCursor(-1)
               event.accepted = true
             }
+          }
+
+          Button {
+            visible: root.apps.length > 0
+            width: parent.width
+            iconText: "󰀻"
+            iconSize: Style.font.title
+            text: "All apps   ·   apply or remove a theme everywhere"
+            fontSize: Style.font.bodySmall
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            leftAlign: true
+            bordered: true
+            onClicked: root.openAll()
           }
 
           Text {
@@ -526,9 +562,9 @@ Panel {
           }
         }
 
-        // ---------- App detail ----------
+        // ---------- App detail / bulk actions ----------
         Column {
-          visible: root.view === "detail"
+          visible: root.view === "detail" || root.view === "all"
           width: parent.width
           spacing: Style.space(10)
 
@@ -546,13 +582,25 @@ Panel {
             }
 
             Text {
-              text: root.selectedInfo ? root.valueLabel(root.selectedInfo.value) : ""
+              text: root.view === "all"
+                ? (root.allValue !== "" ? root.valueLabel(root.allValue) : "Mixed")
+                : root.selectedInfo ? root.valueLabel(root.selectedInfo.value) : ""
               color: Qt.darker(root.bar.foreground, 1.4)
               font.family: root.bar.fontFamily
               font.pixelSize: Style.font.bodySmall
               font.bold: true
               anchors.verticalCenter: parent.verticalCenter
             }
+          }
+
+          Text {
+            visible: root.view === "all"
+            text: "These actions replace the theme choice for every supported app."
+            color: Qt.darker(root.bar.foreground, 1.4)
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+            width: parent.width
           }
 
           PanelSectionHeader {
@@ -573,8 +621,10 @@ Panel {
               foreground: root.bar.foreground
               fontFamily: root.bar.fontFamily
               bordered: true
-              active: root.selectedInfo && root.selectedInfo.value === "default"
-              onClicked: root.runSet(root.selectedApp, "default")
+              active: root.targetApp === "all"
+                ? root.allValue === "default"
+                : root.selectedInfo && root.selectedInfo.value === "default"
+              onClicked: root.runSet(root.targetApp, "default")
             }
 
             Button {
@@ -584,13 +634,17 @@ Panel {
               foreground: root.bar.foreground
               fontFamily: root.bar.fontFamily
               bordered: true
-              active: root.selectedInfo && root.selectedInfo.value === "off"
-              onClicked: root.runSet(root.selectedApp, "off")
+              active: root.targetApp === "all"
+                ? root.allValue === "off"
+                : root.selectedInfo && root.selectedInfo.value === "off"
+              onClicked: root.runSet(root.targetApp, "off")
             }
           }
 
           PanelSectionHeader {
-            text: "USE ANOTHER THEME FOR THIS APP"
+            text: root.view === "all"
+              ? "APPLY ONE THEME TO ALL APPS"
+              : "USE ANOTHER THEME FOR THIS APP"
             foreground: root.bar.foreground
             fontFamily: root.bar.fontFamily
           }
@@ -611,7 +665,7 @@ Panel {
             }
             Keys.onReturnPressed: function(event) {
               if (root.filteredThemes.length > 0)
-                root.runSet(root.selectedApp, root.filteredThemes[0])
+                root.runSet(root.targetApp, root.filteredThemes[0])
               event.accepted = true
             }
           }
@@ -650,8 +704,8 @@ Panel {
                   foreground: root.bar.foreground
                   fontFamily: root.bar.fontFamily
                   bordered: true
-                  active: root.selectedInfo && root.selectedInfo.value === modelData
-                  onClicked: root.runSet(root.selectedApp, modelData)
+                  active: root.targetApp !== "all" && root.selectedInfo && root.selectedInfo.value === modelData
+                  onClicked: root.runSet(root.targetApp, modelData)
                 }
               }
             }

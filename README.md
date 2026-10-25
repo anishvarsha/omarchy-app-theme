@@ -13,13 +13,15 @@ Omarchy.
 
 - **Per-app choice:** follow the current Omarchy theme, use the app's native
   look, or pin a different Omarchy theme to that one app.
+- **All apps:** apply one theme everywhere, follow Omarchy everywhere, or make
+  every app native in one action.
 - **Search:** filter the app list or theme list by name instead of scrolling
   through all of them.
 - **Browsers:** controls Chromium, Google Chrome, Microsoft Edge, and Brave.
   Native mode removes the `BrowserThemeColor` policy that triggers Chrome’s
   “set by your organization” message.
-- **Apps:** browsers, Alacritty, Foot, Kitty, Ghostty, btop, Helix, VS Code
-  (Code, Insiders, VSCodium, Cursor), and Obsidian.
+- **Apps:** browsers, Alacritty, Foot, Kitty, Ghostty, btop, Helix, Neovim,
+  tmux, VS Code (Code, Insiders, VSCodium, Cursor), and Obsidian.
 - **Survives theme switches:** a small theme-set hook reapplies your choices
   after Omarchy finishes setting a new theme.
 - **Reset:** one click restores every app to Omarchy defaults. This also
@@ -72,6 +74,8 @@ ln -s ~/.config/omarchy/plugins/io.github.anishvarsha.app-theme/bin/omarchy-app-
 Click the brush in the bar:
 
 - **App row** — open that app’s settings.
+- **All apps** — apply a theme to every app, or switch all apps to Omarchy or
+  native mode at once.
 - **Follow Omarchy** — normal Omarchy theming.
 - **Native look** — remove Omarchy theming for that app.
 - **A theme name** — pin that theme to the app, even when you switch the
@@ -84,6 +88,8 @@ The same settings live in `~/.config/omarchy/app-theme/config.conf`:
 ```ini
 browser=off
 btop=catppuccin
+nvim=tokyo-night
+tmux=catppuccin
 terminal=default
 kitty=tokyo-night
 ```
@@ -98,6 +104,11 @@ Omarchy writes app configs into `~/.local/state/omarchy/current/theme/`. The
 engine points each app at either that live theme, removes/neutralizes its
 include, or renders another theme with Omarchy’s own
 `omarchy-theme-set-templates` in a throwaway `HOME` and points the app there.
+
+Neovim uses Omarchy’s `~/.config/nvim/lua/plugins/theme.lua` link. tmux is
+applied live through Omarchy’s tmux script; while tmux is pinned, the plugin
+keeps a small managed `run-shell` block in `tmux.conf` so the choice survives
+starting a new tmux server.
 
 The theme-set hook is installed at
 `~/.config/omarchy/hooks/theme-set.d/50-app-theme`. It runs after Omarchy’s own
@@ -135,8 +146,15 @@ rm -f ~/.local/bin/omarchy-app-theme
 
 - The engine needs `bash`, `jq`, `flock`, and Omarchy’s theme commands.
 - Apps that are not installed are skipped.
-- VS Code and Obsidian are updated on disk; restart them if they do not pick
-  up the change.
+- VS Code gets one extension containing every Omarchy theme, so switching
+  between pinned themes applies immediately. Reload VS Code once after
+  installing or updating this plugin (`Ctrl+Shift+P` → **Developer: Reload
+  Window**) so it can discover that extension; after that, theme changes do not
+  need a reload.
+- Obsidian and Neovim are updated on disk; restart or reload them if they do
+  not pick up the change.
+- tmux is updated immediately when it is running. Starting tmux applies a
+  pinned theme through the managed startup hook.
 - Plugins run unsandboxed inside `omarchy-shell`. This one only runs the shell
   scripts in its own `bin/` directory and, for browser control, the privileged
   helper described above.

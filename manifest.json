@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.anishvarsha.app-theme",
   "name": "App themes",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "anishvarsha",
   "description": "Choose the Omarchy theme for each app, or leave an app with its native look",
   "kinds": [

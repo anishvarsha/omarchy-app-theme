@@ -12,6 +12,7 @@
 #   omarchy-app-theme get <app>
 #   omarchy-app-theme is <app> <value>
 #   omarchy-app-theme apply [--quiet]
+#   omarchy-app-theme set all <default|off|theme-slug>
 #   omarchy-app-theme verify
 
 set -u
@@ -24,11 +25,16 @@ LOG="$STATE_DIR/app-theme.log"
 HELPER="/usr/local/bin/omarchy-app-theme-browser"
 CURRENT_THEME_DIR="$HOME/.local/state/omarchy/current/theme"
 
-APPS=(browser alacritty foot kitty ghostty btop helix vscode obsidian)
+APPS=(browser alacritty foot kitty ghostty btop helix nvim tmux vscode obsidian)
 TERMINALS=(alacritty foot kitty ghostty)
+TMUX_CONF="$HOME/.config/tmux/tmux.conf"
+TMUX_BLOCK_START="# >>> omarchy-app-theme >>>"
+TMUX_BLOCK_END="# <<< omarchy-app-theme <<<"
+NVIM_THEME="$HOME/.config/nvim/lua/plugins/theme.lua"
 declare -A CFG=()
 QUIET=0
 TOUCHED_TERMINAL=0
+PREPARE_VSCODE=1
 
 mkdir -p "$STATE_DIR" 2>/dev/null || true
 
@@ -130,10 +136,27 @@ app_label() {
     ghostty) printf 'Ghostty' ;;
     btop) printf 'btop' ;;
     helix) printf 'Helix' ;;
+    nvim) printf 'Neovim' ;;
+    tmux) printf 'tmux' ;;
     vscode) printf 'VS Code' ;;
     obsidian) printf 'Obsidian' ;;
     *) printf '%s' "$1" ;;
   esac
+}
+
+nvim_theme_supported() {
+  local target
+  [[ -e $NVIM_THEME || -L $NVIM_THEME ]] || return 0
+
+  if [[ -L $NVIM_THEME ]]; then
+    target=$(readlink -f "$NVIM_THEME" 2>/dev/null) || return 1
+    case $target in
+      "$CURRENT_THEME_DIR/neovim.lua" | "$RENDER_DIR"/*/neovim.lua) return 0 ;;
+      *) return 1 ;;
+    esac
+  fi
+
+  grep -q 'Managed by omarchy-app-theme' "$NVIM_THEME" 2>/dev/null
 }
 
 app_present() {
@@ -151,6 +174,15 @@ app_present() {
     ghostty) [[ -f $HOME/.config/ghostty/config ]] ;;
     btop) [[ -f $HOME/.config/btop/btop.conf ]] ;;
     helix) [[ -d $HOME/.config/helix ]] ;;
+    nvim)
+      command -v nvim >/dev/null 2>&1 &&
+        [[ -d $HOME/.config/nvim ]] &&
+        nvim_theme_supported
+      ;;
+    tmux)
+      command -v tmux >/dev/null 2>&1 &&
+        [[ -f $TMUX_CONF ]]
+      ;;
     vscode)
       local entry
       for entry in "${VSCODE_VARIANTS[@]}"; do
@@ -532,6 +564,207 @@ helix_apply() {
   return 0
 }
 
+# --- Neovim --------------------------------------------------------------
+
+nvim_apply() {
+  local mode=$1 theme=${2:-} source=""
+
+  if ! nvim_theme_supported; then
+    warn "nvim: $NVIM_THEME is not managed by Omarchy or this plugin; leaving it alone"
+    return 1
+  fi
+
+  case $mode in
+    off)
+      if [[ -L $NVIM_THEME ]] || [[ ! -e $NVIM_THEME ]]; then
+        rm -f "$NVIM_THEME"
+      elif ! grep -q 'Managed by omarchy-app-theme' "$NVIM_THEME" 2>/dev/null; then
+        warn "nvim: refusing to overwrite custom $NVIM_THEME"
+        return 1
+      fi
+
+      mkdir -p "$(dirname "$NVIM_THEME")" || return 1
+      cat >"$NVIM_THEME" <<'EOF'
+-- Managed by omarchy-app-theme: native Neovim colors
+return {}
+EOF
+      log "nvim: theme -> native"
+      return 0
+      ;;
+    default)
+      source="$CURRENT_THEME_DIR/neovim.lua"
+      ;;
+    *)
+      source="$RENDER_DIR/$theme/neovim.lua"
+      [[ -f $source ]] || {
+        warn "nvim: theme '$theme' did not render neovim.lua"
+        return 1
+      }
+      ;;
+  esac
+
+  [[ -f $source ]] || return 0
+  mkdir -p "$(dirname "$NVIM_THEME")" || return 1
+  ln -sfn "$source" "$NVIM_THEME" || return 1
+  log "nvim: theme -> $source"
+}
+
+# --- tmux ----------------------------------------------------------------
+
+tmux_running() {
+  command -v tmux >/dev/null 2>&1 && tmux list-sessions >/dev/null 2>&1
+}
+
+# A run-shell hook starts while the server is still coming up, so a single
+# list-sessions check can race the server and silently skip the theme.
+tmux_wait_running() {
+  local i
+  for ((i = 0; i < 50; i++)); do
+    tmux_running && return 0
+    sleep 0.1
+  done
+  return 1
+}
+
+tmux_block_remove() {
+  local tmp
+
+  [[ -f $TMUX_CONF ]] || return 0
+  grep -Fq "$TMUX_BLOCK_START" "$TMUX_CONF" 2>/dev/null || return 0
+  grep -Fq "$TMUX_BLOCK_END" "$TMUX_CONF" 2>/dev/null || return 0
+
+  tmp=$(mktemp) || return 1
+  if awk -v start="$TMUX_BLOCK_START" -v end="$TMUX_BLOCK_END" '
+    $0 == start { skip = 1; next }
+    $0 == end { skip = 0; next }
+    !skip { print }
+  ' "$TMUX_CONF" >"$tmp"; then
+    cat "$tmp" >"$TMUX_CONF" || {
+      rm -f "$tmp"
+      return 1
+    }
+    rm -f "$tmp"
+    log "tmux: removed startup hook"
+  else
+    rm -f "$tmp"
+    return 1
+  fi
+}
+
+tmux_block_install() {
+  local engine engine_q tmp
+
+  [[ -f $TMUX_CONF ]] || return 0
+  engine=$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")
+  engine_q=$(printf '%q' "$engine")
+
+  tmux_block_remove || return 1
+  tmp=$(mktemp) || return 1
+  {
+    cat "$TMUX_CONF"
+    printf '\n%s\n' "$TMUX_BLOCK_START"
+    printf 'run-shell -b "%s apply-tmux"\n' "$engine_q"
+    printf '%s\n' "$TMUX_BLOCK_END"
+  } >"$tmp" || {
+    rm -f "$tmp"
+    return 1
+  }
+
+  if ! cmp -s "$tmp" "$TMUX_CONF"; then
+    cat "$tmp" >"$TMUX_CONF" || {
+      rm -f "$tmp"
+      return 1
+    }
+    log "tmux: installed startup hook"
+  fi
+  rm -f "$tmp"
+}
+
+tmux_runtime_default() {
+  if [[ -n ${TMUX:-} ]]; then
+    tmux_wait_running || return 0
+  else
+    tmux_running || return 0
+  fi
+  omarchy-theme-set-tmux >/dev/null 2>&1 || true
+}
+
+tmux_runtime_theme() {
+  local theme=$1 tmp rc=0
+
+  if [[ -n ${TMUX:-} ]]; then
+    tmux_wait_running || return 0
+  else
+    tmux_running || return 0
+  fi
+  [[ -d $RENDER_DIR/$theme ]] || return 1
+
+  tmp=$(mktemp -d) || return 1
+  mkdir -p "$tmp/.local/state/omarchy/current" || rc=1
+  if (( rc == 0 )); then
+    ln -s "$RENDER_DIR/$theme" "$tmp/.local/state/omarchy/current/theme" || rc=1
+  fi
+  if (( rc == 0 )); then
+    HOME="$tmp" omarchy-theme-set-tmux >/dev/null 2>&1 || rc=1
+  fi
+  rm -rf "$tmp"
+  log "tmux: theme -> ${theme}"
+  return "$rc"
+}
+
+tmux_runtime_off() {
+  local file="$CURRENT_THEME_DIR/gum_env.lua" key session
+
+  if [[ -n ${TMUX:-} ]]; then
+    tmux_wait_running || return 0
+  else
+    tmux_running || return 0
+  fi
+
+  tmux set-option -gu window-style 2>/dev/null || true
+  tmux set-option -gu window-active-style 2>/dev/null || true
+  tmux set-option -gu cursor-colour 2>/dev/null || true
+
+  if [[ -f $file ]]; then
+    while IFS= read -r key; do
+      [[ -n $key ]] || continue
+      tmux set-environment -gu "$key" 2>/dev/null || true
+      while IFS= read -r session; do
+        [[ -n $session ]] || continue
+        tmux set-environment -t "$session" -u "$key" 2>/dev/null || true
+      done < <(tmux list-sessions -F '#{session_id}' 2>/dev/null)
+    done < <(awk -F'"' '/hl\.env\("[A-Z0-9_]+", "[^"]+"\)/ { print $2 }' "$file")
+  fi
+
+  # Reapply the user's static config so Omarchy's window/pane styles are gone.
+  tmux source-file "$TMUX_CONF" >/dev/null 2>&1 || true
+  log "tmux: theme -> native"
+}
+
+tmux_apply() {
+  local mode=$1 theme=${2:-}
+
+  [[ -f $TMUX_CONF ]] || return 0
+
+  case $mode in
+    default | off)
+      tmux_block_remove || return 1
+      if [[ $mode == default ]]; then
+        tmux_runtime_default
+      else
+        tmux_runtime_off
+      fi
+      ;;
+    *)
+      tmux_block_install || return 1
+      tmux_runtime_theme "$theme" || {
+        warn "tmux: could not apply theme '$theme'"
+        return 1
+      }
+      ;;
+  esac
+}
+
 # --- VS Code family ------------------------------------------------------
 
 VSCODE_VARIANTS=(
@@ -579,7 +812,7 @@ vscode_register_extension() {
   tmp=$(mktemp) || return 1
   if jq \
     --arg id "local.omarchy-app-theme" \
-    --arg version "1.0.0" \
+    --arg version "1.1.0" \
     --arg fs_path "$ext_dir" \
     --arg external "file://$ext_dir" \
     --arg relative "$relative" \
@@ -605,54 +838,106 @@ vscode_register_extension() {
   fi
 }
 
-vscode_override_label() {
-  local extbase=$1 theme=$2 ext src label ui_theme
+vscode_theme_signature() {
+  theme_slugs | sha256sum | cut -d' ' -f1
+}
+
+vscode_extension_ready() {
+  local extbase=$1 ext pkg count have
   ext="$extbase/omarchy-app-theme"
-  src="$RENDER_DIR/$theme/vscode-theme.json"
-  label="Omarchy (App: $theme)"
+  pkg="$ext/package.json"
+  [[ -f $pkg && -f $ext/.themes && -f $ext/.count ]] || return 1
+  count=$(<"$ext/.count")
+  [[ $count =~ ^[0-9]+$ ]] && (( count > 0 )) || return 1
+  have=$(jq -r '.contributes.themes | length' "$pkg" 2>/dev/null) || return 1
+  (( have == count )) || return 1
+  [[ $(<"$ext/.themes") == "$(vscode_theme_signature)" ]] || return 1
+  (( $(find "$ext/themes" -maxdepth 1 -name '*.json' 2>/dev/null | wc -l) >= count )) || return 1
+}
 
-  [[ -f $src ]] || return 1
-  ui_theme=$(jq -r '.type // "dark"' "$src" 2>/dev/null || printf 'dark')
-  [[ $ui_theme == light ]] && ui_theme=vs || ui_theme=vs-dark
+# VS Code only scans its extension folders at startup. Installing a one-theme
+# extension per override therefore made every new pinned theme invisible until
+# a reload. Keep one extension with a stable set of labels for every Omarchy
+# theme instead: switching labels then works immediately, just like any other
+# installed theme.
+vscode_build_extension() {
+  local extbase=$1 ext=$1/omarchy-app-theme themes_dir=$1/omarchy-app-theme/themes
+  local pkg_tmp slug src theme_type ui_theme first=1 count=0
 
-  mkdir -p "$ext/themes" || return 1
-  cp "$src" "$ext/themes/omarchy-app-theme.json" || return 1
+  mkdir -p "$themes_dir" || return 1
+  pkg_tmp=$(mktemp) || return 1
 
-  cat >"$ext/package.json" <<EOF || return 1
+  {
+    cat <<'EOF'
 {
   "name": "omarchy-app-theme",
   "displayName": "Omarchy App Theme",
-  "description": "Per-app Omarchy color theme",
+  "description": "Per-app Omarchy color themes",
   "publisher": "local",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "engines": { "vscode": "^1.70.0" },
   "categories": ["Themes"],
   "contributes": {
-    "themes": [{
-      "label": "$label",
-      "uiTheme": "$ui_theme",
-      "path": "./themes/omarchy-app-theme.json"
-    }]
-  }
-}
+    "themes": [
 EOF
+    while IFS= read -r slug; do
+      [[ -n $slug ]] || continue
+      render_theme "$slug" >/dev/null 2>&1 || {
+        log "vscode: skipped theme '$slug' (render failed)"
+        continue
+      }
+      src="$RENDER_DIR/$slug/vscode-theme.json"
+      [[ -f $src ]] || continue
+      cp "$src" "$themes_dir/$slug.json" || continue
+      theme_type=$(jq -r '.type // "dark"' "$src" 2>/dev/null || printf 'dark')
+      [[ $theme_type == light ]] && ui_theme=vs || ui_theme=vs-dark
+      (( first )) || printf ',\n'
+      printf '      {"label": "Omarchy (App: %s)", "uiTheme": "%s", "path": "./themes/%s.json"}' \
+        "$slug" "$ui_theme" "$slug"
+      first=0
+      count=$((count + 1))
+    done < <(theme_slugs)
+    printf '\n    ]\n  }\n}\n'
+  } >"$pkg_tmp" || {
+    rm -f "$pkg_tmp"
+    return 1
+  }
 
+  if (( count == 0 )); then
+    rm -f "$pkg_tmp"
+    return 1
+  fi
+
+  mv "$pkg_tmp" "$ext/package.json" || {
+    rm -f "$pkg_tmp"
+    return 1
+  }
   vscode_register_extension "$ext" "$extbase" || return 1
-  printf '%s' "$label"
+  vscode_theme_signature >"$ext/.themes" || true
+  printf '%s\n' "$count" >"$ext/.count" || true
+  log "vscode: prepared $count app themes in $ext"
+}
+
+vscode_ensure_extension() {
+  local extbase=$1
+  vscode_extension_ready "$extbase" && return 0
+  vscode_build_extension "$extbase"
 }
 
 vscode_apply() {
-  local mode=$1 theme=${2:-} entry cmd settings extbase skip label
+  local mode=$1 theme=${2:-} entry cmd settings extbase skip
   local any=0
 
-  # Drop a previous per-app theme extension before switching back to Omarchy
-  # or native. Otherwise VS Code keeps a stale "Omarchy (App: …)" entry in its
-  # theme picker after the override is gone.
-  if [[ $mode == default || $mode == off ]]; then
-    vscode_clean_overrides
-  fi
-
   if [[ $mode == default ]]; then
+    # Prepare the stable multi-theme extension even while the app follows
+    # Omarchy, so a later pin does not need a VS Code reload to become visible.
+    if (( PREPARE_VSCODE )); then
+      for entry in "${VSCODE_VARIANTS[@]}"; do
+        IFS='|' read -r cmd settings extbase skip <<<"$entry"
+        vscode_present "$cmd" || continue
+        vscode_ensure_extension "$extbase" >/dev/null 2>&1 || true
+      done
+    fi
     # Let Omarchy's own script handle variants and its skip-* toggles.
     omarchy-theme-set-vscode >/dev/null 2>&1 || true
     return 0
@@ -671,11 +956,11 @@ vscode_apply() {
       continue
     fi
 
-    label=$(vscode_override_label "$extbase" "$theme") || {
-      warn "vscode: could not install app theme for $cmd"
+    vscode_ensure_extension "$extbase" || {
+      warn "vscode: could not install app themes for $cmd"
       continue
     }
-    vscode_set_theme "$settings" "$label" || {
+    vscode_set_theme "$settings" "Omarchy (App: $theme)" || {
       warn "vscode: could not update $settings"
       continue
     }
@@ -817,6 +1102,8 @@ apply_one() {
     alacritty | foot | kitty | ghostty) term_apply "$app" "$value" "$theme" ;;
     btop) btop_apply "$value" "$theme" ;;
     helix) helix_apply "$value" "$theme" ;;
+    nvim) nvim_apply "$value" "$theme" ;;
+    tmux) tmux_apply "$value" "$theme" ;;
     vscode) vscode_apply "$value" "$theme" ;;
     obsidian) obsidian_apply "$value" "$theme" ;;
     *)
@@ -827,18 +1114,23 @@ apply_one() {
 }
 
 apply_all() {
-  local app value
+  local app value rc=0
   TOUCHED_TERMINAL=0
   config_load
 
   for app in "${APPS[@]}"; do
     value=$(resolve_value "$app")
-    apply_one "$app" "$value" || note_fail "$app: failed to apply '$value'"
+    apply_one "$app" "$value" || {
+      note_fail "$app: failed to apply '$value'"
+      rc=1
+    }
   done
 
   if (( TOUCHED_TERMINAL )); then
     omarchy-restart-terminal >/dev/null 2>&1 || true
   fi
+
+  return "$rc"
 }
 
 config_write() {
@@ -863,9 +1155,9 @@ config_reset() {
 #   off          leave the app with its own native look (no Omarchy theme)
 #   <theme-slug> apply that Omarchy theme to this app only
 #
-# App names: browser, alacritty, foot, kitty, ghostty, btop, helix, vscode,
-# obsidian. The special `terminal` line applies to all four terminals; a
-# per-terminal line overrides it.
+# App names: browser, alacritty, foot, kitty, ghostty, btop, helix, nvim,
+# tmux, vscode, obsidian. The special `terminal` line applies to all four
+# terminals; a per-terminal line overrides it. `set all` writes every app.
 #
 # This is the Omarchy default: every app follows the current theme. Change a
 # line and run `omarchy-app-theme apply`, or use the widget / `set`.
@@ -877,6 +1169,8 @@ kitty=default
 ghostty=default
 btop=default
 helix=default
+nvim=default
+tmux=default
 vscode=default
 obsidian=default
 EOF
@@ -897,10 +1191,44 @@ cmd_reset() {
     return 1
   }
   rm -rf "$RENDER_DIR"/* 2>/dev/null || true
-  vscode_clean_overrides
   config_load
   apply_all
   say "reset all apps to Omarchy defaults"
+}
+
+cmd_prepare_vscode() {
+  local entry cmd settings extbase skip any=0
+  for entry in "${VSCODE_VARIANTS[@]}"; do
+    IFS='|' read -r cmd settings extbase skip <<<"$entry"
+    vscode_present "$cmd" || continue
+    any=1
+    vscode_ensure_extension "$extbase" || {
+      warn "vscode: could not prepare app themes for $cmd"
+      return 1
+    }
+  done
+  (( any )) || return 0
+}
+
+cmd_apply_tmux() {
+  local value theme=""
+
+  [[ -f $TMUX_CONF ]] || return 0
+  config_load
+  value=$(resolve_value tmux)
+
+  case $value in
+    default) tmux_runtime_default ;;
+    off) tmux_runtime_off ;;
+    *)
+      theme=$value
+      render_theme "$theme" >/dev/null || {
+        warn "tmux: could not render theme '$theme'"
+        return 1
+      }
+      tmux_runtime_theme "$theme" || return 1
+      ;;
+  esac
 }
 
 cmd_install_hook() {
@@ -967,8 +1295,10 @@ cmd_uninstall() {
   local purge=0
   [[ ${1:-} == --purge ]] && purge=1
 
+  PREPARE_VSCODE=0
   cmd_reset
   cmd_remove_hook
+  vscode_clean_overrides
 
   if (( purge )); then
     rm -rf "$CONFIG_DIR" "$STATE_DIR"
@@ -990,10 +1320,12 @@ usage() {
   cat <<'EOF'
 Usage:
   omarchy-app-theme list
-  omarchy-app-theme set <app> <default|off|theme-slug>
+  omarchy-app-theme set <app|all> <default|off|theme-slug>
   omarchy-app-theme get <app>
   omarchy-app-theme is <app> <value>
   omarchy-app-theme apply [--quiet]
+  omarchy-app-theme apply-tmux
+  omarchy-app-theme prepare-vscode
   omarchy-app-theme reset [app...]
   omarchy-app-theme json
   omarchy-app-theme themes
@@ -1002,8 +1334,10 @@ Usage:
   omarchy-app-theme uninstall [--purge]
 
 Apps:
-  browser, alacritty, foot, kitty, ghostty, btop, helix, vscode, obsidian
-  (the special app "terminal" sets all four terminals)
+  browser, alacritty, foot, kitty, ghostty, btop, helix, nvim, tmux, vscode,
+  obsidian
+  The special app "terminal" sets all four terminals.
+  The special app "all" sets every app.
 
 Values:
   default            follow the current Omarchy theme
@@ -1044,16 +1378,29 @@ cmd_is() {
 cmd_set() {
   local app=$1 value=$2 normalized t rc=0
 
-  is_app "$app" || {
-    warn "unknown app '$app' (try: omarchy-app-theme list)"
-    return 2
-  }
-
   normalized=$(normalize_value "$value")
   if [[ $normalized != default && $normalized != off ]] && ! valid_theme "$normalized"; then
     warn "unknown theme '$value'"
     return 2
   fi
+
+  if [[ $app == all ]]; then
+    for t in "${APPS[@]}"; do
+      config_write "$t" "$normalized" || {
+        warn "could not write $CONFIG"
+        return 1
+      }
+    done
+    config_load
+    apply_all || rc=1
+    say "all apps -> $normalized"
+    return "$rc"
+  fi
+
+  is_app "$app" || {
+    warn "unknown app '$app' (try: omarchy-app-theme list)"
+    return 2
+  }
 
   config_write "$app" "$normalized" || {
     warn "could not write $CONFIG"
@@ -1116,6 +1463,12 @@ main() {
     apply)
       [[ ${1:-} == --quiet ]] && QUIET=1
       apply_all
+      ;;
+    apply-tmux)
+      cmd_apply_tmux
+      ;;
+    prepare-vscode)
+      cmd_prepare_vscode
       ;;
     set)
       (( $# >= 2 )) || {
