@@ -13,21 +13,28 @@ Omarchy.
 
 - **Per-app choice:** follow the current Omarchy theme, use the app's native
   look, or pin a different Omarchy theme to that one app.
+- **Global switch:** pause all per-app choices and make every app follow
+  Omarchy. Your saved choices return when you turn it back on.
 - **All apps:** apply one theme everywhere, follow Omarchy everywhere, or make
   every app native in one action.
-- **Search:** filter the app list or theme list by name instead of scrolling
-  through all of them.
+- **Search every app:** the app list uses the same desktop entries as Omarchy's
+  launcher, so it includes Files, Zed, and every other installed app. The list
+  is scrollable; supported apps come first, followed by apps that follow the
+  system GTK theme. The theme list is searchable too.
 - **Browsers:** controls Chromium, Google Chrome, Microsoft Edge, and Brave.
   Native mode removes the `BrowserThemeColor` policy that triggers Chrome’s
   “set by your organization” message.
 - **Apps:** browsers, Alacritty, Foot, Kitty, Ghostty, btop, Helix, Neovim,
-  tmux, VS Code (Code, Insiders, VSCodium, Cursor), and Obsidian.
+  tmux, VS Code (Code, Insiders, VSCodium, Cursor), Zed, Obsidian, Claude Code,
+  Pi, T3 Code, and Hermes.
 - **Survives theme switches:** a small theme-set hook reapplies your choices
   after Omarchy finishes setting a new theme.
 - **Reset:** one click restores every app to Omarchy defaults. This also
   restores Omarchy’s browser policy; choose **Native** for browsers afterward if
   you want to keep them unmanaged.
-- **Bar widget:** click the brush icon to change an app, pick a theme, or reset.
+- **Bar widget:** click the brush icon, press `Super + Shift + A`, or run
+  `omarchy-shell shell toggle io.github.anishvarsha.app-theme` to change an
+  app, pick a theme, or reset.
 
 ## Install
 
@@ -71,13 +78,20 @@ ln -s ~/.config/omarchy/plugins/io.github.anishvarsha.app-theme/bin/omarchy-app-
 
 ## Use
 
-Click the brush in the bar:
+Click the brush in the bar, or press `Super + Shift + A`:
 
+- **Search** — type in the search box to filter all installed apps. Files and
+  other apps without an adapter are listed under **Other installed apps** and
+  follow the system GTK theme.
+- **Per-app theming switch** — turn every override off and make every app
+  follow Omarchy. Turning it back on restores the saved choices.
 - **App row** — open that app’s settings.
 - **All apps** — apply a theme to every app, or switch all apps to Omarchy or
   native mode at once.
 - **Follow Omarchy** — normal Omarchy theming.
-- **Native look** — remove Omarchy theming for that app.
+- **Native look** — remove Omarchy theming for that app. For Claude Code, Pi,
+  T3 Code, and Hermes this clears the Omarchy theme and restores the app’s
+  default look.
 - **A theme name** — pin that theme to the app, even when you switch the
   desktop to another theme.
 - **Reset everything to Omarchy defaults** — puts every app back on the
@@ -86,16 +100,20 @@ Click the brush in the bar:
 The same settings live in `~/.config/omarchy/app-theme/config.conf`:
 
 ```ini
+enabled=true
 browser=off
 btop=catppuccin
 nvim=tokyo-night
 tmux=catppuccin
 terminal=default
 kitty=tokyo-night
+claude=gruvbox
+pi=default
 ```
 
 Values are `default`, `off`, or a theme slug such as `catppuccin`. `terminal`
-sets all four terminals; a per-terminal line overrides it. After editing, run
+sets all four terminals; a per-terminal line overrides it. `enabled=false`
+pauses every per-app choice and applies Omarchy everywhere. After editing, run
 `omarchy-app-theme apply`, or just reopen the widget.
 
 ## How it works
@@ -109,6 +127,17 @@ Neovim uses Omarchy’s `~/.config/nvim/lua/plugins/theme.lua` link. tmux is
 applied live through Omarchy’s tmux script; while tmux is pinned, the plugin
 keeps a small managed `run-shell` block in `tmux.conf` so the choice survives
 starting a new tmux server.
+
+Zed gets a generated custom theme in `~/.config/zed/themes/` and a managed
+theme value in `~/.config/zed/settings.json`. The settings editor preserves
+comments and trailing commas. Native mode removes the generated theme and
+restores the theme value that was there before the plugin first changed it.
+
+Claude Code, Pi, T3 Code, and Hermes use Omarchy’s own theme-set scripts. A
+pinned theme is given to those scripts through a throwaway `HOME` pointing at
+the rendered theme, while their real config directories are passed back
+through `CLAUDE_CONFIG_DIR`, `T3CODE_HOME`, `HERMES_HOME`, or a symlinked
+`~/.pi`. This keeps their native configuration and hot reload intact.
 
 The theme-set hook is installed at
 `~/.config/omarchy/hooks/theme-set.d/50-app-theme`. It runs after Omarchy’s own
@@ -144,8 +173,10 @@ rm -f ~/.local/bin/omarchy-app-theme
 
 ## Notes
 
-- The engine needs `bash`, `jq`, `flock`, and Omarchy’s theme commands.
-- Apps that are not installed are skipped.
+- The engine needs `bash`, `jq`, `flock`, `python3` (for Zed settings), and
+  Omarchy’s theme commands.
+- Apps that are not installed are skipped. Apps without an adapter, such as
+  Files, are still listed in the panel but follow the system GTK theme.
 - VS Code gets one extension containing every Omarchy theme, so switching
   between pinned themes applies immediately. Reload VS Code once after
   installing or updating this plugin (`Ctrl+Shift+P` → **Developer: Reload

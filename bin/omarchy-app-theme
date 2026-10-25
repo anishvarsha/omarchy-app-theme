@@ -9,8 +9,9 @@
 # Usage:
 #   omarchy-app-theme list
 #   omarchy-app-theme set <app> <default|off|theme-slug>
-#   omarchy-app-theme get <app>
-#   omarchy-app-theme is <app> <value>
+#   omarchy-app-theme set enabled <on|off>
+#   omarchy-app-theme get <app|enabled>
+#   omarchy-app-theme is <app|enabled> <value>
 #   omarchy-app-theme apply [--quiet]
 #   omarchy-app-theme set all <default|off|theme-slug>
 #   omarchy-app-theme verify
@@ -24,8 +25,12 @@ RENDER_DIR="$STATE_DIR/rendered"
 LOG="$STATE_DIR/app-theme.log"
 HELPER="/usr/local/bin/omarchy-app-theme-browser"
 CURRENT_THEME_DIR="$HOME/.local/state/omarchy/current/theme"
+ENGINE_DIR=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
+ZED_SETTINGS="$HOME/.config/zed/settings.json"
+ZED_THEME_DIR="$HOME/.config/zed/themes"
+ZED_THEME_BACKUP="$STATE_DIR/zed-theme.backup"
 
-APPS=(browser alacritty foot kitty ghostty btop helix nvim tmux vscode obsidian)
+APPS=(browser alacritty foot kitty ghostty btop helix nvim tmux vscode zed obsidian claude pi t3code hermes)
 TERMINALS=(alacritty foot kitty ghostty)
 TMUX_CONF="$HOME/.config/tmux/tmux.conf"
 TMUX_BLOCK_START="# >>> omarchy-app-theme >>>"
@@ -76,6 +81,18 @@ normalize_value() {
   esac
 }
 
+normalize_enabled() {
+  case ${1,,} in
+    on | true | yes | 1 | enabled) printf 'true' ;;
+    off | false | no | 0 | disabled) printf 'false' ;;
+    *) return 1 ;;
+  esac
+}
+
+per_app_enabled() {
+  [[ ${CFG[enabled]:-true} != false ]]
+}
+
 theme_dir() {
   local dir
   dir=$(omarchy-theme-dir "$1" 2>/dev/null) || return 1
@@ -94,7 +111,7 @@ config_load() {
   CFG=()
   [[ -f $CONFIG ]] || return 0
 
-  local line key value
+  local line key value enabled_value
   while IFS= read -r line || [[ -n $line ]]; do
     line=${line%%#*}
     [[ $line =~ ^[[:space:]]*$ ]] && continue
@@ -108,7 +125,13 @@ config_load() {
     key=${key,,}
     [[ -n $key && -n $value ]] || continue
 
-    if [[ $key == terminal ]]; then
+    if [[ $key == enabled ]]; then
+      if enabled_value=$(normalize_enabled "$value"); then
+        CFG[enabled]=$enabled_value
+      else
+        warn "config: invalid enabled value '$value' (use true or false)"
+      fi
+    elif [[ $key == terminal ]]; then
       CFG[terminal]=$(normalize_value "$value")
     elif is_app "$key"; then
       CFG[$key]=$(normalize_value "$value")
@@ -139,7 +162,12 @@ app_label() {
     nvim) printf 'Neovim' ;;
     tmux) printf 'tmux' ;;
     vscode) printf 'VS Code' ;;
+    zed) printf 'Zed' ;;
     obsidian) printf 'Obsidian' ;;
+    claude) printf 'Claude Code' ;;
+    pi) printf 'Pi' ;;
+    t3code) printf 'T3 Code' ;;
+    hermes) printf 'Hermes' ;;
     *) printf '%s' "$1" ;;
   esac
 }
@@ -190,7 +218,16 @@ app_present() {
       done
       return 1
       ;;
+    zed)
+      command -v zed >/dev/null 2>&1 ||
+        command -v zeditor >/dev/null 2>&1 ||
+        [[ -d $HOME/.config/zed ]]
+      ;;
     obsidian) [[ -f $HOME/.config/obsidian/obsidian.json ]] ;;
+    claude) [[ -d $HOME/.claude ]] ;;
+    pi) [[ -d $HOME/.pi/agent ]] ;;
+    t3code) [[ -d $HOME/.t3/userdata ]] ;;
+    hermes) [[ -f $HOME/.hermes/config.yaml ]] ;;
     *) return 1 ;;
   esac
 }
@@ -227,6 +264,10 @@ hook_installed() {
 
 resolve_value() {
   local app=$1 value
+  if ! per_app_enabled; then
+    printf 'default'
+    return 0
+  fi
   value=$(normalize_value "$(effective_value "$app")")
   if [[ $value == default || $value == off ]]; then
     printf '%s' "$value"
@@ -986,6 +1027,205 @@ vscode_clean_overrides() {
   done
 }
 
+# --- Zed ----------------------------------------------------------------
+
+zed_color() {
+  local file=$1 key=$2 fallback=$3 value
+  value=$(awk -F= -v key="$key" '
+    $1 ~ "^[[:space:]]*" key "[[:space:]]*$" {
+      gsub(/[[:space:]"}]/, "", $2)
+      print $2
+      exit
+    }
+  ' "$file" 2>/dev/null)
+  [[ $value =~ ^#[0-9a-fA-F]{6}$ ]] && printf '%s' "$value" || printf '%s' "$fallback"
+}
+
+zed_theme_style() {
+  local colors=$1 bg bg_dark bg_darker bg_light bg_lighter fg fg_dark fg_light fg_bright
+  local accent selection muted red yellow orange green cyan blue magenta brown
+  local bright_red bright_yellow bright_green bright_cyan bright_blue bright_magenta
+  local template="$ENGINE_DIR/zed-theme.style.json"
+  local -a args=()
+
+  [[ -f $template ]] || {
+    warn "zed: missing theme template $template"
+    return 1
+  }
+
+  bg=$(zed_color "$colors" background '#1e1e2e')
+  bg_dark=$(zed_color "$colors" dark_background "$bg")
+  bg_darker=$(zed_color "$colors" darker_background "$bg_dark")
+  bg_light=$(zed_color "$colors" lighter_background "$bg")
+  selection=$(zed_color "$colors" selection "$bg_light")
+  bg_lighter=$(zed_color "$colors" selection "$bg_light")
+  fg=$(zed_color "$colors" foreground '#cdd6f4')
+  fg_dark=$(zed_color "$colors" dark_foreground '#6c7086')
+  fg_light=$(zed_color "$colors" light_foreground "$fg")
+  fg_bright=$(zed_color "$colors" bright_foreground "$fg")
+  muted=$(zed_color "$colors" muted "$fg_dark")
+  red=$(zed_color "$colors" red '#f38ba8')
+  yellow=$(zed_color "$colors" yellow '#f9e2af')
+  orange=$(zed_color "$colors" orange "$yellow")
+  green=$(zed_color "$colors" green '#a6e3a1')
+  cyan=$(zed_color "$colors" cyan '#94e2d5')
+  blue=$(zed_color "$colors" blue '#89b4fa')
+  accent=$(zed_color "$colors" accent "$blue")
+  magenta=$(zed_color "$colors" magenta '#f5c2e7')
+  brown=$(zed_color "$colors" brown "$orange")
+  bright_red=$(zed_color "$colors" bright_red "$red")
+  bright_yellow=$(zed_color "$colors" bright_yellow "$yellow")
+  bright_green=$(zed_color "$colors" bright_green "$green")
+  bright_cyan=$(zed_color "$colors" bright_cyan "$cyan")
+  bright_blue=$(zed_color "$colors" bright_blue "$blue")
+  bright_magenta=$(zed_color "$colors" bright_magenta "$magenta")
+
+  local -a pairs=(
+    "BG=$bg"
+    "BG_DARK=$bg_dark"
+    "BG_DARKER=$bg_darker"
+    "BG_LIGHT=$bg_light"
+    "BG_LIGHTER=$bg_lighter"
+    "FG=$fg"
+    "FG_DARK=$fg_dark"
+    "FG_LIGHT=$fg_light"
+    "FG_BRIGHT=$fg_bright"
+    "ACCENT=$accent"
+    "SELECTION=$selection"
+    "MUTED=$muted"
+    "RED=$red"
+    "YELLOW=$yellow"
+    "ORANGE=$orange"
+    "GREEN=$green"
+    "CYAN=$cyan"
+    "BLUE=$blue"
+    "MAGENTA=$magenta"
+    "BROWN=$brown"
+    "BRIGHT_RED=$bright_red"
+    "BRIGHT_YELLOW=$bright_yellow"
+    "BRIGHT_GREEN=$bright_green"
+    "BRIGHT_CYAN=$bright_cyan"
+    "BRIGHT_BLUE=$bright_blue"
+    "BRIGHT_MAGENTA=$bright_magenta"
+  )
+
+  local pair
+  for pair in "${pairs[@]}"; do
+    args+=(-e "s|__${pair%%=*}__|${pair#*=}|g")
+  done
+  sed "${args[@]}" "$template"
+}
+
+zed_write_theme() {
+  local colors=$1 slug=$2 appearance style tmp dir="$ZED_THEME_DIR"
+  local file="$dir/omarchy-app-$slug.json"
+
+  [[ -f $colors ]] || return 1
+  appearance=$(awk -F= '$1 ~ /^[[:space:]]*mode[[:space:]]*$/ {
+    gsub(/[[:space:]"}]/, "", $2); print $2; exit
+  }' "$colors" 2>/dev/null)
+  [[ $appearance == light ]] || appearance=dark
+
+  style=$(zed_theme_style "$colors") || return 1
+  mkdir -p "$dir" || return 1
+  tmp=$(mktemp) || return 1
+  if ! jq -n \
+    --arg name "Omarchy App: $slug" \
+    --arg appearance "$appearance" \
+    --argjson style "$style" \
+    '{
+      "$schema": "https://zed.dev/schema/themes/v0.2.0.json",
+      name: "Omarchy App",
+      author: "Omarchy",
+      themes: [{ name: $name, appearance: $appearance, style: $style }]
+    }' >"$tmp"; then
+    rm -f "$tmp"
+    warn "zed: could not generate theme '$slug'"
+    return 1
+  fi
+  mv "$tmp" "$file" || {
+    rm -f "$tmp"
+    return 1
+  }
+  chmod 644 "$file" || true
+  printf '%s' "Omarchy App: $slug"
+}
+
+zed_settings_set() {
+  local value=$1
+  mkdir -p "$(dirname "$ZED_SETTINGS")" || return 1
+  [[ -f $ZED_SETTINGS ]] || printf '{\n}\n' >"$ZED_SETTINGS" || return 1
+  python3 "$ENGINE_DIR/zed-settings.py" set "$ZED_SETTINGS" "$value"
+}
+
+zed_settings_remove() {
+  [[ -f $ZED_SETTINGS ]] || return 0
+  python3 "$ENGINE_DIR/zed-settings.py" remove "$ZED_SETTINGS"
+}
+
+zed_backup() {
+  local tmp
+  [[ -f $ZED_THEME_BACKUP ]] && return 0
+  mkdir -p "$STATE_DIR" || return 1
+  tmp=$(mktemp) || return 1
+  if [[ -f $ZED_SETTINGS ]]; then
+    python3 "$ENGINE_DIR/zed-settings.py" get "$ZED_SETTINGS" >"$tmp" || {
+      rm -f "$tmp"
+      warn "zed: could not read $ZED_SETTINGS"
+      return 1
+    }
+  else
+    printf '__MISSING__\n' >"$tmp"
+  fi
+  mv "$tmp" "$ZED_THEME_BACKUP"
+}
+
+zed_off() {
+  local original
+  rm -f "$ZED_THEME_DIR"/omarchy-app-*.json 2>/dev/null || true
+  [[ -f $ZED_THEME_BACKUP ]] || return 0
+  original=$(<"$ZED_THEME_BACKUP")
+  rm -f "$ZED_THEME_BACKUP"
+  if [[ $original == __MISSING__ || -z $original ]]; then
+    zed_settings_remove
+  else
+    python3 "$ENGINE_DIR/zed-settings.py" set-raw "$ZED_SETTINGS" "$original"
+  fi
+}
+
+zed_apply() {
+  local mode=$1 theme=${2:-} slug colors name
+
+  case $mode in
+    off)
+      zed_off
+      return
+      ;;
+    default)
+      colors="$CURRENT_THEME_DIR/colors.toml"
+      slug=$(current_theme_name)
+      [[ -n $slug ]] || slug=current
+      ;;
+    *)
+      colors="$RENDER_DIR/$theme/colors.toml"
+      slug=$theme
+      ;;
+  esac
+
+  [[ -f $colors ]] || {
+    warn "zed: colors.toml not found for '$slug'"
+    return 1
+  }
+
+  zed_backup || return 1
+  name=$(zed_write_theme "$colors" "$slug") || return 1
+  zed_settings_set "$(jq -Rn --arg value "$name" '$value')" || {
+    warn "zed: could not update $ZED_SETTINGS"
+    return 1
+  }
+  log "zed: theme -> $name"
+}
+
 # --- Obsidian ------------------------------------------------------------
 
 obsidian_appearance_off() {
@@ -1078,6 +1318,181 @@ EOF
   done < <(jq -r '.vaults | values[].path' "$conf" 2>/dev/null)
 }
 
+# --- Omarchy AI apps -----------------------------------------------------
+
+omarchy_app_script() {
+  local name=$1 script
+  script="${OMARCHY_PATH:-/usr/share/omarchy}/bin/$name"
+  [[ -x $script ]] || script=$(command -v "$name" 2>/dev/null || true)
+  [[ -n $script && -x $script ]] || return 1
+  printf '%s' "$script"
+}
+
+# Give Omarchy's app scripts a throwaway HOME that points at the pinned
+# rendered theme. The scripts normally read the live current theme, so this is
+# what lets Claude/Pi/Hermes follow a pinned theme without changing the desktop.
+ai_theme_home() {
+  local theme=$1 tmp
+  tmp=$(mktemp -d "$STATE_DIR/.ai-${theme}.XXXXXX") || return 1
+  mkdir -p "$tmp/.local/state/omarchy/current" || {
+    rm -rf "$tmp"
+    return 1
+  }
+  ln -s "$RENDER_DIR/$theme" "$tmp/.local/state/omarchy/current/theme" || {
+    rm -rf "$tmp"
+    return 1
+  }
+  printf '%s\n' "$theme" >"$tmp/.local/state/omarchy/current/theme.name" || {
+    rm -rf "$tmp"
+    return 1
+  }
+  printf '%s' "$tmp"
+}
+
+claude_off() {
+  local settings="$HOME/.claude/settings.json" file="$HOME/.claude/themes/omarchy.json" tmp
+  rm -f "$file"
+  [[ -f $settings ]] || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+  [[ $(jq -r '.theme // empty' "$settings" 2>/dev/null) == custom:omarchy ]] || return 0
+  tmp=$(mktemp) || return 1
+  if jq 'del(.theme)' "$settings" >"$tmp" 2>/dev/null; then
+    mv "$tmp" "$settings" || {
+      rm -f "$tmp"
+      return 1
+    }
+  else
+    rm -f "$tmp"
+    return 1
+  fi
+}
+
+claude_apply() {
+  local mode=$1 theme=${2:-} script tmp real_home=$HOME rc
+  script=$(omarchy_app_script omarchy-theme-set-claude) || return 0
+
+  case $mode in
+    default) "$script" --activate ;;
+    off) claude_off ;;
+    *)
+      [[ -f $RENDER_DIR/$theme/claude.json ]] || {
+        warn "claude: theme '$theme' did not render claude.json"
+        return 1
+      }
+      tmp=$(ai_theme_home "$theme") || return 1
+      HOME="$tmp" CLAUDE_CONFIG_DIR="$real_home/.claude" "$script" --activate
+      rc=$?
+      rm -rf "$tmp"
+      return "$rc"
+      ;;
+  esac
+}
+
+pi_off() {
+  local settings="$HOME/.pi/agent/settings.json" file="$HOME/.pi/agent/themes/omarchy-system.json" tmp
+  rm -f "$file"
+  [[ -f $settings ]] || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+  [[ $(jq -r '.theme // empty' "$settings" 2>/dev/null) == omarchy-system ]] || return 0
+  tmp=$(mktemp) || return 1
+  if jq 'del(.theme)' "$settings" >"$tmp" 2>/dev/null; then
+    mv "$tmp" "$settings" || {
+      rm -f "$tmp"
+      return 1
+    }
+  else
+    rm -f "$tmp"
+    return 1
+  fi
+}
+
+pi_apply() {
+  local mode=$1 theme=${2:-} script tmp real_home=$HOME rc
+  script=$(omarchy_app_script omarchy-theme-set-pi) || return 0
+
+  case $mode in
+    default) "$script" --activate ;;
+    off) pi_off ;;
+    *)
+      [[ -f $RENDER_DIR/$theme/pi.json ]] || {
+        warn "pi: theme '$theme' did not render pi.json"
+        return 1
+      }
+      tmp=$(ai_theme_home "$theme") || return 1
+      ln -s "$real_home/.pi" "$tmp/.pi" || {
+        rm -rf "$tmp"
+        return 1
+      }
+      HOME="$tmp" "$script" --activate
+      rc=$?
+      rm -rf "$tmp"
+      return "$rc"
+      ;;
+  esac
+}
+
+t3code_apply() {
+  local mode=$1 theme=${2:-} script tmp real_home=$HOME rc
+  script=$(omarchy_app_script omarchy-theme-set-t3code) || return 0
+
+  case $mode in
+    default) "$script" ;;
+    off) rm -f "$HOME/.t3/userdata/themes/omarchy.json" ;;
+    *)
+      [[ -f $RENDER_DIR/$theme/t3code.json ]] || {
+        warn "t3code: theme '$theme' did not render t3code.json"
+        return 1
+      }
+      tmp=$(ai_theme_home "$theme") || return 1
+      HOME="$tmp" T3CODE_HOME="$real_home/.t3" "$script"
+      rc=$?
+      rm -rf "$tmp"
+      return "$rc"
+      ;;
+  esac
+}
+
+hermes_off() {
+  local config="$HOME/.hermes/config.yaml" skin
+  [[ -f $config ]] || return 0
+
+  if command -v hermes >/dev/null 2>&1; then
+    skin=$(timeout 15 hermes config get display.skin 2>/dev/null || true)
+    [[ $skin == omarchy ]] || return 0
+    timeout 15 hermes config set display.skin default >/dev/null 2>&1 || true
+    return 0
+  fi
+
+  if grep -qE '^[[:space:]]*skin:[[:space:]]*omarchy[[:space:]]*$' "$config"; then
+    sed -i -E 's|^([[:space:]]*skin:[[:space:]]*)omarchy[[:space:]]*$|\1default|' "$config" || return 1
+  fi
+}
+
+hermes_apply() {
+  local mode=$1 theme=${2:-} script tmp real_home=$HOME rc
+  script=$(omarchy_app_script omarchy-theme-set-hermes) || return 0
+
+  case $mode in
+    default) "$script" --activate ;;
+    off) hermes_off ;;
+    *)
+      [[ -f $RENDER_DIR/$theme/hermes.yaml ]] || {
+        warn "hermes: theme '$theme' did not render hermes.yaml"
+        return 1
+      }
+      tmp=$(ai_theme_home "$theme") || return 1
+      if [[ -x $real_home/.local/bin/hermes ]]; then
+        mkdir -p "$tmp/.local/bin"
+        ln -s "$real_home/.local/bin/hermes" "$tmp/.local/bin/hermes" || true
+      fi
+      HOME="$tmp" HERMES_HOME="$real_home/.hermes" "$script"
+      rc=$?
+      rm -rf "$tmp"
+      return "$rc"
+      ;;
+  esac
+}
+
 # --- dispatch ------------------------------------------------------------
 
 apply_one() {
@@ -1105,7 +1520,12 @@ apply_one() {
     nvim) nvim_apply "$value" "$theme" ;;
     tmux) tmux_apply "$value" "$theme" ;;
     vscode) vscode_apply "$value" "$theme" ;;
+    zed) zed_apply "$value" "$theme" ;;
     obsidian) obsidian_apply "$value" "$theme" ;;
+    claude) claude_apply "$value" "$theme" ;;
+    pi) pi_apply "$value" "$theme" ;;
+    t3code) t3code_apply "$value" "$theme" ;;
+    hermes) hermes_apply "$value" "$theme" ;;
     *)
       warn "unknown app '$app'"
       return 1
@@ -1156,12 +1576,17 @@ config_reset() {
 #   <theme-slug> apply that Omarchy theme to this app only
 #
 # App names: browser, alacritty, foot, kitty, ghostty, btop, helix, nvim,
-# tmux, vscode, obsidian. The special `terminal` line applies to all four
-# terminals; a per-terminal line overrides it. `set all` writes every app.
+# tmux, vscode, zed, obsidian, claude, pi, t3code, hermes. The special
+# `terminal` line applies to all four terminals; a per-terminal line overrides
+# it. `set all` writes every app.
+#
+# `enabled=false` pauses all per-app choices and makes every app follow
+# Omarchy. Turning it back on restores the choices below.
 #
 # This is the Omarchy default: every app follows the current theme. Change a
 # line and run `omarchy-app-theme apply`, or use the widget / `set`.
 
+enabled=true
 browser=default
 alacritty=default
 foot=default
@@ -1172,7 +1597,12 @@ helix=default
 nvim=default
 tmux=default
 vscode=default
+zed=default
 obsidian=default
+claude=default
+pi=default
+t3code=default
+hermes=default
 EOF
 }
 
@@ -1259,13 +1689,14 @@ cmd_remove_hook() {
 }
 
 cmd_json() {
-  local app value installed present apps='[]' themes helper=false hook=false
+  local app value installed enabled=false apps='[]' themes helper=false hook=false
   command -v jq >/dev/null 2>&1 || {
     warn "jq is required for JSON output"
     return 1
   }
 
   config_load
+  per_app_enabled && enabled=true
   for app in "${APPS[@]}"; do
     value=$(normalize_value "$(effective_value "$app")")
     installed=false
@@ -1284,11 +1715,12 @@ cmd_json() {
   jq -n \
     --arg currentTheme "$(current_theme_name)" \
     --arg config "$CONFIG" \
+    --argjson enabled "$enabled" \
     --argjson apps "$apps" \
     --argjson themes "$themes" \
     --argjson helper "$helper" \
     --argjson hook "$hook" \
-    '{ currentTheme: $currentTheme, config: $config, apps: $apps, themes: $themes, helper: $helper, hook: $hook }'
+    '{ currentTheme: $currentTheme, config: $config, enabled: $enabled, apps: $apps, themes: $themes, helper: $helper, hook: $hook }'
 }
 
 cmd_uninstall() {
@@ -1297,6 +1729,7 @@ cmd_uninstall() {
 
   PREPARE_VSCODE=0
   cmd_reset
+  zed_off
   cmd_remove_hook
   vscode_clean_overrides
 
@@ -1321,8 +1754,9 @@ usage() {
 Usage:
   omarchy-app-theme list
   omarchy-app-theme set <app|all> <default|off|theme-slug>
-  omarchy-app-theme get <app>
-  omarchy-app-theme is <app> <value>
+  omarchy-app-theme set enabled <on|off>
+  omarchy-app-theme get <app|enabled>
+  omarchy-app-theme is <app|enabled> <value>
   omarchy-app-theme apply [--quiet]
   omarchy-app-theme apply-tmux
   omarchy-app-theme prepare-vscode
@@ -1335,9 +1769,10 @@ Usage:
 
 Apps:
   browser, alacritty, foot, kitty, ghostty, btop, helix, nvim, tmux, vscode,
-  obsidian
+  zed, obsidian, claude, pi, t3code, hermes
   The special app "terminal" sets all four terminals.
   The special app "all" sets every app.
+  "enabled off" pauses per-app theming and makes every app follow Omarchy.
 
 Values:
   default            follow the current Omarchy theme
@@ -1349,15 +1784,25 @@ EOF
 cmd_list() {
   local app
   config_load
-  printf '%-12s %s\n' APP VALUE
+  if per_app_enabled; then
+    printf '%-14s %s\n' 'per-app' 'on'
+  else
+    printf '%-14s %s\n' 'per-app' 'off'
+  fi
+  printf '%-14s %s\n' APP VALUE
   for app in "${APPS[@]}"; do
-    printf '%-12s %s\n' "$app" "$(normalize_value "$(effective_value "$app")")"
+    printf '%-14s %s\n' "$app" "$(normalize_value "$(effective_value "$app")")"
   done
-  printf '%-12s %s\n' terminal "$(normalize_value "${CFG[terminal]:-default}")"
+  printf '%-14s %s\n' terminal "$(normalize_value "${CFG[terminal]:-default}")"
 }
 
 cmd_get() {
   local app=$1
+  if [[ $app == enabled ]]; then
+    config_load
+    per_app_enabled && printf 'true\n' || printf 'false\n'
+    return 0
+  fi
   is_app "$app" || {
     warn "unknown app '$app'"
     return 2
@@ -1368,6 +1813,13 @@ cmd_get() {
 
 cmd_is() {
   local app=$1 expected actual
+  if [[ $app == enabled ]]; then
+    expected=$(normalize_enabled "$2") || return 2
+    config_load
+    per_app_enabled && actual=true || actual=false
+    [[ $actual == "$expected" ]]
+    return
+  fi
   is_app "$app" || return 2
   expected=$(normalize_value "$2")
   config_load
@@ -1376,7 +1828,26 @@ cmd_is() {
 }
 
 cmd_set() {
-  local app=$1 value=$2 normalized t rc=0
+  local app=$1 value=$2 normalized t rc=0 enabled_value
+
+  if [[ $app == enabled ]]; then
+    enabled_value=$(normalize_enabled "$value") || {
+      warn "enabled expects on or off"
+      return 2
+    }
+    config_write enabled "$enabled_value" || {
+      warn "could not write $CONFIG"
+      return 1
+    }
+    config_load
+    apply_all || rc=1
+    if [[ $enabled_value == true ]]; then
+      say "per-app theming -> on"
+    else
+      say "per-app theming -> off (all apps follow Omarchy)"
+    fi
+    return "$rc"
+  fi
 
   normalized=$(normalize_value "$value")
   if [[ $normalized != default && $normalized != off ]] && ! valid_theme "$normalized"; then
@@ -1420,8 +1891,11 @@ cmd_set() {
       omarchy-restart-terminal >/dev/null 2>&1 || true
     fi
   else
-    apply_one "$app" "$normalized" || {
-      note_fail "$app: failed to apply '$normalized'"
+    # If per-app theming is paused, keep the saved choice but apply Omarchy
+    # until the global switch is turned back on.
+    value=$(resolve_value "$app")
+    apply_one "$app" "$value" || {
+      note_fail "$app: failed to apply '$value'"
       rc=1
     }
   fi
@@ -1435,6 +1909,11 @@ cmd_verify() {
   config_load
 
   printf 'config: %s\n' "$CONFIG"
+  if per_app_enabled; then
+    printf 'per-app theming: on\n'
+  else
+    printf 'per-app theming: off (all apps follow Omarchy)\n'
+  fi
   for app in "${APPS[@]}"; do
     printf '%-12s %s\n' "$app" "$(resolve_value "$app")"
   done

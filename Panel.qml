@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import Quickshell
 import Quickshell.Io
 import qs.Commons
@@ -19,6 +20,7 @@ Panel {
   readonly property string home: Quickshell.env("HOME") || ""
 
   property var status: ({})
+  property var desktopValues: DesktopEntries.applications.values || []
   property string busyText: ""
   property string errorText: ""
   property string view: "apps"
@@ -32,6 +34,7 @@ Panel {
   readonly property string currentTheme: status.currentTheme || ""
   readonly property bool helperReady: status.helper === true
   readonly property bool hookReady: status.hook === true
+  readonly property bool perAppEnabled: status.enabled !== false
   readonly property var selectedInfo: {
     for (var i = 0; i < apps.length; i++)
       if (apps[i].id === selectedApp) return apps[i]
@@ -45,15 +48,35 @@ Panel {
       if (apps[i].value !== first) return ""
     return first
   }
-  readonly property var filteredApps: {
-    var query = appQuery.trim().toLowerCase()
-    if (query === "") return apps
-    return apps.filter(function(app) {
-      return String(app.id).toLowerCase().indexOf(query) !== -1 ||
-        String(app.label).toLowerCase().indexOf(query) !== -1 ||
-        appKeywords(app.id).toLowerCase().indexOf(query) !== -1
-    })
+  readonly property var otherApps: {
+    var values = desktopValues || []
+    var seen = {}
+    var out = []
+    for (var i = 0; i < values.length; i++) {
+      var entry = values[i]
+      if (!entry || entry.noDisplay === true) continue
+      var id = String(entry.id || "").replace(/\.desktop$/, "")
+      if (id === "" || seen[id] === true) continue
+      if (desktopIsCovered(entry)) continue
+      seen[id] = true
+      out.push({
+        id: "desktop:" + id,
+        desktopId: id,
+        label: String(entry.name || id),
+        value: "system",
+        supported: false,
+        installed: true,
+        iconName: String(entry.icon || ""),
+        keywords: "desktop system " + String(entry.genericName || "") + " " + String(entry.keywords || "")
+      })
+    }
+    out.sort(function(a, b) { return a.label.localeCompare(b.label) })
+    return out
   }
+  readonly property int totalApps: apps.length + otherApps.length
+  readonly property var filteredApps: filterAppList(apps)
+  readonly property var filteredOtherApps: filterAppList(otherApps)
+  readonly property bool hasAppMatches: filteredApps.length + filteredOtherApps.length > 0
   readonly property var filteredThemes: {
     var all = status.themes || []
     var query = themeQuery.trim().toLowerCase()
@@ -96,7 +119,12 @@ Panel {
       case "nvim": return "neovim vim editor text code"
       case "tmux": return "terminal multiplexer term"
       case "vscode": return "code cursor vscodium insiders editor text"
+      case "zed": return "zed editor text code rust"
       case "obsidian": return "notes markdown editor text"
+      case "claude": return "ai agent anthropic assistant code terminal"
+      case "pi": return "ai agent assistant code terminal"
+      case "t3code": return "ai agent assistant t3 code editor"
+      case "hermes": return "ai agent assistant code desktop"
       default: return ""
     }
   }
@@ -113,13 +141,70 @@ Panel {
       case "nvim": return ""
       case "tmux": return "󰆍"
       case "vscode": return "󰨞"
+      case "zed": return "󰨞"
       case "obsidian": return "󱓷"
+      case "claude": return "󰚩"
+      case "pi": return "󰚩"
+      case "t3code": return "󰚩"
+      case "hermes": return "󰚩"
       default: return "󰏘"
     }
   }
 
+  function filterAppList(list) {
+    var query = appQuery.trim().toLowerCase()
+    if (query === "") return list
+    return list.filter(function(app) {
+      return String(app.id).toLowerCase().indexOf(query) !== -1 ||
+        String(app.label).toLowerCase().indexOf(query) !== -1 ||
+        String(app.keywords || appKeywords(app.id)).toLowerCase().indexOf(query) !== -1
+    })
+  }
+
+  // Supported apps already have a dedicated row in `apps`. Do not repeat the
+  // same desktop entry in the "other installed apps" section.
+  function desktopIsCovered(entry) {
+    var id = String(entry.id || "").toLowerCase().replace(/\.desktop$/, "")
+    var name = String(entry.name || "").toLowerCase()
+    var text = id + " " + name + " " + String(entry.genericName || "").toLowerCase()
+
+    if (id === "dev.zed.zed" || id === "zed" || name === "zed") return true
+    if (text.indexOf("visual studio code") !== -1 || text.indexOf("vscodium") !== -1 ||
+        text.indexOf("vscode") !== -1 || text.indexOf("code - oss") !== -1) return true
+    if (id === "code" || id === "code-insiders" || id === "codium" ||
+        id === "vscodium" || id === "cursor") return true
+    if (text.indexOf("obsidian") !== -1) return true
+    if (text.indexOf("claude code") !== -1) return true
+    if (text.indexOf("t3 code") !== -1 || text.indexOf("t3code") !== -1) return true
+    if (text.indexOf("hermes") !== -1) return true
+    if (id === "pi" || name === "pi") return true
+    if (id === "alacritty" || name === "alacritty") return true
+    if (id === "foot" || name === "foot") return true
+    if (id === "kitty" || name === "kitty") return true
+    if (text.indexOf("ghostty") !== -1) return true
+    if (id === "btop" || name === "btop") return true
+    if (id === "helix" || name === "helix" || id === "hx") return true
+    if (id === "nvim" || id === "neovim" || text.indexOf("neovim") !== -1) return true
+    if (id === "tmux" || name === "tmux") return true
+    if (id === "chromium" || id === "chromium-browser" ||
+        id === "google-chrome" || id === "microsoft-edge" ||
+        id === "brave-browser" || id === "brave" ||
+        text.indexOf("chromium") !== -1) return true
+    return false
+  }
+
   function openApp(id) {
-    if (actionProc.running) return
+    if (actionProc.running || !root.perAppEnabled) return
+    var supported = false
+    for (var i = 0; i < apps.length; i++)
+      if (apps[i].id === id) supported = true
+    if (!supported) {
+      var label = id
+      for (var j = 0; j < otherApps.length; j++)
+        if (otherApps[j].id === id) label = otherApps[j].label
+      errorText = label + " follows Omarchy's system GTK theme. It does not have a separate app-theme adapter."
+      return
+    }
     selectedApp = id
     themeQuery = ""
     view = "detail"
@@ -127,7 +212,7 @@ Panel {
   }
 
   function openAll() {
-    if (actionProc.running) return
+    if (actionProc.running || !root.perAppEnabled) return
     selectedApp = ""
     themeQuery = ""
     view = "all"
@@ -140,14 +225,21 @@ Panel {
     selectedApp = ""
     themeQuery = ""
     cursorIndex = -1
+    Qt.callLater(function() { appSearch.forceActiveFocus() })
   }
 
   function runSet(app, value) {
     if (actionProc.running) return
     errorText = ""
-    busyText = "Applying " + valueLabel(value) + " to " + (app === "browser" ? "browsers" : app === "all" ? "all apps" : app) + "…"
+    busyText = app === "enabled"
+      ? (value === "on" ? "Turning per-app theming on…" : "Applying Omarchy everywhere…")
+      : "Applying " + valueLabel(value) + " to " + (app === "browser" ? "browsers" : app === "all" ? "all apps" : app) + "…"
     actionProc.command = [root.script, "set", app, value]
     actionProc.running = true
+  }
+
+  function togglePerApp() {
+    runSet("enabled", root.perAppEnabled ? "off" : "on")
   }
 
   function resetAll() {
@@ -188,17 +280,29 @@ Panel {
 
   onOpenedChanged: {
     if (opened) {
+      desktopValues = (DesktopEntries.applications.values || []).slice()
       refresh()
       errorText = ""
       appQuery = ""
       cursorIndex = -1
-      if (view === "detail" && !selectedInfo) backToApps()
+      view = "apps"
+      selectedApp = ""
+      themeQuery = ""
+      Qt.callLater(function() { appSearch.forceActiveFocus() })
     }
   }
 
   Component.onCompleted: {
+    desktopValues = (DesktopEntries.applications.values || []).slice()
     refresh()
     applyQuiet()
+  }
+
+  Connections {
+    target: DesktopEntries.applications
+    function onValuesChanged() {
+      root.desktopValues = (DesktopEntries.applications.values || []).slice()
+    }
   }
 
   // Keep a browser-native app native even if Omarchy's own theme pipeline
@@ -319,6 +423,7 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
+      blocked: appSearch.activeFocus || themeSearch.activeFocus
       onMoveRequested: function(dx, dy) {
         root.moveCursor(dx !== 0 ? dx : dy)
       }
@@ -410,9 +515,33 @@ Panel {
           width: parent.width
           spacing: Style.space(8)
 
+          Button {
+            width: parent.width
+            iconText: root.perAppEnabled ? "󰄬" : "󰅖"
+            iconSize: Style.font.title
+            text: root.perAppEnabled ? "Per-app theming is on" : "Per-app theming is off"
+            fontSize: Style.font.bodySmall
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            leftAlign: true
+            bordered: true
+            active: root.perAppEnabled
+            onClicked: root.togglePerApp()
+          }
+
           Text {
-            visible: root.apps.length === 0
-            text: "No supported apps found."
+            visible: !root.perAppEnabled
+            text: "Every app follows the current Omarchy theme. Saved app choices return when you turn this back on."
+            color: Qt.darker(root.bar.foreground, 1.4)
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+            width: parent.width
+          }
+
+          Text {
+            visible: root.totalApps === 0
+            text: "No installed apps found."
             color: root.bar.foreground
             opacity: 0.6
             font.family: root.bar.fontFamily
@@ -421,9 +550,9 @@ Panel {
 
           TextField {
             id: appSearch
-            visible: root.apps.length > 0
+            visible: root.totalApps > 0
             width: parent.width
-            placeholderText: "Search " + root.apps.length + " apps…"
+            placeholderText: "Search " + root.totalApps + " apps…"
             foreground: root.bar.foreground
             accent: Color.accent
             font.family: root.bar.fontFamily
@@ -435,8 +564,11 @@ Panel {
               event.accepted = true
             }
             Keys.onReturnPressed: function(event) {
-              if (root.filteredApps.length > 0)
-                root.openApp(root.filteredApps[0].id)
+              var index = root.cursorIndex >= 0 ? root.cursorIndex : 0
+              if (root.filteredApps.length > index)
+                root.openApp(root.filteredApps[index].id)
+              else if (root.filteredOtherApps.length > 0)
+                root.openApp(root.filteredOtherApps[0].id)
               event.accepted = true
             }
             Keys.onDownPressed: function(event) {
@@ -451,6 +583,7 @@ Panel {
 
           Button {
             visible: root.apps.length > 0
+            enabled: root.perAppEnabled
             width: parent.width
             iconText: "󰀻"
             iconSize: Style.font.title
@@ -464,7 +597,7 @@ Panel {
           }
 
           Text {
-            visible: root.apps.length > 0 && root.filteredApps.length === 0
+            visible: root.totalApps > 0 && !root.hasAppMatches
             text: "No apps match “" + root.appQuery + "”."
             color: root.bar.foreground
             opacity: 0.6
@@ -473,24 +606,77 @@ Panel {
             width: parent.width
           }
 
-          Repeater {
-            model: root.filteredApps
-            Button {
-              required property var modelData
-              required property int index
-              width: column.width
-              iconText: root.appIcon(modelData.id)
-              iconSize: Style.font.title
-              text: modelData.label + "   ·   " + root.valueLabel(modelData.value)
-              fontSize: Style.font.bodySmall
-              foreground: root.bar.foreground
-              fontFamily: root.bar.fontFamily
-              leftAlign: true
-              bordered: true
-              active: modelData.value !== "default"
-              hasCursor: root.cursorIndex === index
-              onClicked: root.openApp(modelData.id)
-              onHovered: function(hovered) { if (hovered) root.cursorIndex = index }
+          Flickable {
+            id: appScroll
+            visible: root.totalApps > 0 && root.hasAppMatches
+            width: parent.width
+            height: Math.min(appRows.implicitHeight, Style.space(320))
+            contentWidth: width
+            contentHeight: appRows.implicitHeight
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+            Column {
+              id: appRows
+              width: appScroll.width
+              spacing: Style.space(6)
+
+              PanelSectionHeader {
+                visible: root.filteredApps.length > 0
+                text: "SUPPORTED APPS"
+                foreground: root.bar.foreground
+                fontFamily: root.bar.fontFamily
+              }
+
+              Repeater {
+                model: root.filteredApps
+                Button {
+                  required property var modelData
+                  required property int index
+                  enabled: root.perAppEnabled
+                  width: appRows.width
+                  iconText: root.appIcon(modelData.id)
+                  iconSize: Style.font.title
+                  text: modelData.label + "   ·   " + (root.perAppEnabled ? root.valueLabel(modelData.value) : "Omarchy")
+                  fontSize: Style.font.bodySmall
+                  foreground: root.bar.foreground
+                  fontFamily: root.bar.fontFamily
+                  leftAlign: true
+                  bordered: true
+                  active: modelData.value !== "default"
+                  hasCursor: root.cursorIndex === index
+                  onClicked: root.openApp(modelData.id)
+                  onHovered: function(hovered) { if (hovered) root.cursorIndex = index }
+                }
+              }
+
+              PanelSectionHeader {
+                visible: root.filteredOtherApps.length > 0
+                text: "OTHER INSTALLED APPS · SYSTEM THEME"
+                foreground: root.bar.foreground
+                fontFamily: root.bar.fontFamily
+              }
+
+              Repeater {
+                model: root.filteredOtherApps
+                Button {
+                  required property var modelData
+                  width: appRows.width
+                  iconText: "󰏘"
+                  iconSize: Style.font.title
+                  text: modelData.label + "   ·   System theme"
+                  fontSize: Style.font.bodySmall
+                  foreground: root.bar.foreground
+                  fontFamily: root.bar.fontFamily
+                  leftAlign: true
+                  bordered: true
+                  opacity: 0.72
+                  onClicked: root.openApp(modelData.id)
+                }
+              }
+
+              Item { width: 1; height: Style.space(2) }
             }
           }
 

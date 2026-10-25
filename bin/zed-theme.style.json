@@ -1,0 +1,415 @@
+{
+  "border": "__MUTED__",
+  "border.variant": "__BG_LIGHTER__",
+  "border.focused": "__ACCENT__",
+  "border.selected": "__ACCENT__",
+  "border.transparent": "#00000000",
+  "border.disabled": "__BG_LIGHTER__",
+  "elevated_surface.background": "__BG_LIGHTER__",
+  "surface.background": "__BG_LIGHT__",
+  "background": "__BG__",
+  "element.background": "__BG_LIGHT__",
+  "element.hover": "__BG_LIGHTER__",
+  "element.active": "__SELECTION__",
+  "element.selected": "__SELECTION__",
+  "element.disabled": "__BG_LIGHT__",
+  "drop_target.background": "__SELECTION__66",
+  "ghost_element.background": "#00000000",
+  "ghost_element.hover": "__BG_LIGHTER__",
+  "ghost_element.active": "__SELECTION__",
+  "ghost_element.selected": "__SELECTION__",
+  "ghost_element.disabled": "__BG_LIGHT__",
+  "text": "__FG__",
+  "text.muted": "__FG_DARK__",
+  "text.placeholder": "__FG_DARK__",
+  "text.disabled": "__FG_DARK__",
+  "text.accent": "__ACCENT__",
+  "icon": "__FG__",
+  "icon.muted": "__FG_DARK__",
+  "icon.disabled": "__FG_DARK__",
+  "icon.placeholder": "__FG_DARK__",
+  "icon.accent": "__ACCENT__",
+  "status_bar.background": "__BG__",
+  "title_bar.background": "__BG__",
+  "title_bar.inactive_background": "__BG_LIGHT__",
+  "toolbar.background": "__BG_DARK__",
+  "tab_bar.background": "__BG_LIGHT__",
+  "tab.inactive_background": "__BG_LIGHT__",
+  "tab.active_background": "__BG_DARK__",
+  "search.match_background": "__ACCENT__33",
+  "search.active_match_background": "__ORANGE__33",
+  "panel.background": "__BG_LIGHT__",
+  "panel.focused_border": "__ACCENT__",
+  "pane.focused_border": "__ACCENT__",
+  "scrollbar.thumb.background": "__MUTED__",
+  "scrollbar.thumb.hover_background": "__FG_DARK__",
+  "scrollbar.thumb.border": "__BG_LIGHTER__",
+  "scrollbar.track.background": "#00000000",
+  "scrollbar.track.border": "__BG_LIGHTER__",
+  "editor.foreground": "__FG__",
+  "editor.background": "__BG_DARKER__",
+  "editor.gutter.background": "__BG_DARKER__",
+  "editor.subheader.background": "__BG_LIGHT__",
+  "editor.active_line.background": "__BG_LIGHT__",
+  "editor.highlighted_line.background": "__BG_LIGHT__",
+  "editor.line_number": "__FG_DARK__",
+  "editor.active_line_number": "__FG__",
+  "editor.hover_line_number": "__FG_LIGHT__",
+  "editor.invisible": "__FG_DARK__",
+  "editor.wrap_guide": "__MUTED__33",
+  "editor.active_wrap_guide": "__MUTED__66",
+  "editor.document_highlight.read_background": "__ACCENT__33",
+  "editor.document_highlight.write_background": "__MUTED__66",
+  "terminal.background": "__BG_DARKER__",
+  "terminal.foreground": "__FG__",
+  "terminal.bright_foreground": "__FG_BRIGHT__",
+  "terminal.dim_foreground": "__FG_DARK__",
+  "terminal.ansi.black": "__BG_DARKER__",
+  "terminal.ansi.bright_black": "__MUTED__",
+  "terminal.ansi.dim_black": "__BG_LIGHT__",
+  "terminal.ansi.red": "__RED__",
+  "terminal.ansi.bright_red": "__BRIGHT_RED__",
+  "terminal.ansi.dim_red": "__RED__",
+  "terminal.ansi.green": "__GREEN__",
+  "terminal.ansi.bright_green": "__BRIGHT_GREEN__",
+  "terminal.ansi.dim_green": "__GREEN__",
+  "terminal.ansi.yellow": "__YELLOW__",
+  "terminal.ansi.bright_yellow": "__BRIGHT_YELLOW__",
+  "terminal.ansi.dim_yellow": "__YELLOW__",
+  "terminal.ansi.blue": "__BLUE__",
+  "terminal.ansi.bright_blue": "__BRIGHT_BLUE__",
+  "terminal.ansi.dim_blue": "__BLUE__",
+  "terminal.ansi.magenta": "__MAGENTA__",
+  "terminal.ansi.bright_magenta": "__BRIGHT_MAGENTA__",
+  "terminal.ansi.dim_magenta": "__MAGENTA__",
+  "terminal.ansi.cyan": "__CYAN__",
+  "terminal.ansi.bright_cyan": "__BRIGHT_CYAN__",
+  "terminal.ansi.dim_cyan": "__CYAN__",
+  "terminal.ansi.white": "__FG__",
+  "terminal.ansi.bright_white": "__FG_BRIGHT__",
+  "terminal.ansi.dim_white": "__FG_DARK__",
+  "link_text.hover": "__ACCENT__",
+  "version_control.added": "__GREEN__",
+  "version_control.modified": "__YELLOW__",
+  "version_control.word_added": "__GREEN__66",
+  "version_control.word_deleted": "__RED__66",
+  "version_control.deleted": "__RED__",
+  "version_control.conflict_marker.ours": "__GREEN__33",
+  "version_control.conflict_marker.theirs": "__BLUE__33",
+  "conflict": "__YELLOW__",
+  "conflict.background": "__YELLOW__33",
+  "conflict.border": "__YELLOW__66",
+  "created": "__GREEN__",
+  "created.background": "__GREEN__33",
+  "created.border": "__GREEN__66",
+  "deleted": "__RED__",
+  "deleted.background": "__RED__33",
+  "deleted.border": "__RED__66",
+  "error": "__RED__",
+  "error.background": "__RED__33",
+  "error.border": "__RED__66",
+  "hidden": "__FG_DARK__",
+  "hidden.background": "__MUTED__33",
+  "hidden.border": "__MUTED__66",
+  "hint": "__CYAN__",
+  "hint.background": "__CYAN__33",
+  "hint.border": "__CYAN__66",
+  "ignored": "__FG_DARK__",
+  "ignored.background": "__MUTED__33",
+  "ignored.border": "__MUTED__66",
+  "info": "__BLUE__",
+  "info.background": "__BLUE__33",
+  "info.border": "__BLUE__66",
+  "modified": "__YELLOW__",
+  "modified.background": "__YELLOW__33",
+  "modified.border": "__YELLOW__66",
+  "predictive": "__FG_DARK__",
+  "predictive.background": "__MUTED__33",
+  "predictive.border": "__MUTED__66",
+  "renamed": "__BLUE__",
+  "renamed.background": "__BLUE__33",
+  "renamed.border": "__BLUE__66",
+  "success": "__GREEN__",
+  "success.background": "__GREEN__33",
+  "success.border": "__GREEN__66",
+  "unreachable": "__FG_DARK__",
+  "unreachable.background": "__MUTED__33",
+  "unreachable.border": "__MUTED__66",
+  "warning": "__YELLOW__",
+  "warning.background": "__YELLOW__33",
+  "warning.border": "__YELLOW__66",
+  "players": [
+    {
+      "cursor": "__ACCENT__",
+      "background": "__ACCENT__",
+      "selection": "__ACCENT__66"
+    },
+    {
+      "cursor": "__RED__",
+      "background": "__RED__",
+      "selection": "__RED__66"
+    },
+    {
+      "cursor": "__ORANGE__",
+      "background": "__ORANGE__",
+      "selection": "__ORANGE__66"
+    },
+    {
+      "cursor": "__MAGENTA__",
+      "background": "__MAGENTA__",
+      "selection": "__MAGENTA__66"
+    },
+    {
+      "cursor": "__CYAN__",
+      "background": "__CYAN__",
+      "selection": "__CYAN__66"
+    },
+    {
+      "cursor": "__RED__",
+      "background": "__RED__",
+      "selection": "__RED__66"
+    },
+    {
+      "cursor": "__YELLOW__",
+      "background": "__YELLOW__",
+      "selection": "__YELLOW__66"
+    },
+    {
+      "cursor": "__GREEN__",
+      "background": "__GREEN__",
+      "selection": "__GREEN__66"
+    }
+  ],
+  "syntax": {
+    "attribute": {
+      "color": "__BLUE__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "boolean": {
+      "color": "__ORANGE__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "comment": {
+      "color": "__FG_DARK__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "comment.doc": {
+      "color": "__MUTED__",
+      "font_style": "italic",
+      "font_weight": null
+    },
+    "constant": {
+      "color": "__ORANGE__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "constructor": {
+      "color": "__BLUE__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "embedded": {
+      "color": "__FG__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "emphasis": {
+      "color": "__ACCENT__",
+      "font_style": "italic",
+      "font_weight": null
+    },
+    "emphasis.strong": {
+      "color": "__ORANGE__",
+      "font_style": null,
+      "font_weight": 700
+    },
+    "enum": {
+      "color": "__CYAN__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "function": {
+      "color": "__BLUE__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "hint": {
+      "color": "__MUTED__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "keyword": {
+      "color": "__MAGENTA__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "label": {
+      "color": "__BLUE__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "link_text": {
+      "color": "__BLUE__",
+      "font_style": "italic",
+      "font_weight": null
+    },
+    "link_uri": {
+      "color": "__CYAN__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "namespace": {
+      "color": "__FG__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "number": {
+      "color": "__ORANGE__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "operator": {
+      "color": "__CYAN__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "predictive": {
+      "color": "__FG_DARK__",
+      "font_style": "italic",
+      "font_weight": null
+    },
+    "preproc": {
+      "color": "__MAGENTA__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "primary": {
+      "color": "__FG__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "property": {
+      "color": "__RED__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "punctuation": {
+      "color": "__FG__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "punctuation.bracket": {
+      "color": "__FG__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "punctuation.delimiter": {
+      "color": "__FG__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "punctuation.list_marker": {
+      "color": "__RED__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "punctuation.markup": {
+      "color": "__RED__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "punctuation.special": {
+      "color": "__RED__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "selector": {
+      "color": "__YELLOW__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "selector.pseudo": {
+      "color": "__BLUE__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "string": {
+      "color": "__GREEN__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "string.escape": {
+      "color": "__MUTED__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "string.regex": {
+      "color": "__ORANGE__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "string.special": {
+      "color": "__RED__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "string.special.symbol": {
+      "color": "__RED__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "tag": {
+      "color": "__RED__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "text.literal": {
+      "color": "__GREEN__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "title": {
+      "color": "__BLUE__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "type": {
+      "color": "__YELLOW__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "variable": {
+      "color": "__FG__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "variable.parameter": {
+      "color": "__FG__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "variable.special": {
+      "color": "__RED__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "variant": {
+      "color": "__YELLOW__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "diff.plus": {
+      "color": "__GREEN__",
+      "font_style": null,
+      "font_weight": null
+    },
+    "diff.minus": {
+      "color": "__RED__",
+      "font_style": null,
+      "font_weight": null
+    }
+  }
+}
