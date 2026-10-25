@@ -792,7 +792,17 @@ apply_one() {
   local app=$1 value=$2 theme=""
   case $value in
     default | off) ;;
-    *) theme=$value ;;
+    *)
+      theme=$value
+      # Render the selected theme before any adapter looks for its files.
+      # Browser overrides used to be the only path that did this, so pinning a
+      # theme to a terminal/btop/Helix failed until some other app happened to
+      # render the same theme first.
+      render_theme "$theme" >/dev/null || {
+        warn "$app: could not render theme '$theme'"
+        return 1
+      }
+      ;;
   esac
 
   case $app in
@@ -1025,7 +1035,7 @@ cmd_is() {
 }
 
 cmd_set() {
-  local app=$1 value=$2 normalized t
+  local app=$1 value=$2 normalized t rc=0
 
   is_app "$app" || {
     warn "unknown app '$app' (try: omarchy-app-theme list)"
@@ -1047,16 +1057,23 @@ cmd_set() {
   TOUCHED_TERMINAL=0
   if [[ $app == terminal ]]; then
     for t in "${TERMINALS[@]}"; do
-      apply_one "$t" "$(resolve_value "$t")" || note_fail "$t: failed to apply"
+      apply_one "$t" "$(resolve_value "$t")" || {
+        note_fail "$t: failed to apply"
+        rc=1
+      }
     done
     if (( TOUCHED_TERMINAL )); then
       omarchy-restart-terminal >/dev/null 2>&1 || true
     fi
   else
-    apply_one "$app" "$normalized" || note_fail "$app: failed to apply '$normalized'"
+    apply_one "$app" "$normalized" || {
+      note_fail "$app: failed to apply '$normalized'"
+      rc=1
+    }
   fi
 
   say "$app -> $normalized"
+  return "$rc"
 }
 
 cmd_verify() {
