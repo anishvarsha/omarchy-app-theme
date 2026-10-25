@@ -1741,8 +1741,7 @@ cmd_uninstall() {
   cat <<EOF
 
 System files (only needed if you want to remove browser control):
-  sudo rm -f /usr/local/bin/omarchy-app-theme-browser
-  sudo rm -f /etc/sudoers.d/omarchy-app-theme-browser
+  See the "Remove" section in README.md for the privileged helper cleanup.
 
 If you installed the terminal command:
   rm -f ~/.local/bin/omarchy-app-theme
