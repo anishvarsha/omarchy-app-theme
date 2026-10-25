@@ -9,8 +9,6 @@ managed by your organization”** and lock the theme picker. Setting the browser
 to **Native** removes that policy, while every other app keeps following
 Omarchy.
 
-![App themes panel](preview.png)
-
 ## Features
 
 - **Per-app choice:** follow the current Omarchy theme, use the app's native
@@ -22,7 +20,9 @@ Omarchy.
   (Code, Insiders, VSCodium, Cursor), and Obsidian.
 - **Survives theme switches:** a small theme-set hook reapplies your choices
   after Omarchy finishes setting a new theme.
-- **Reset:** one click restores every app to Omarchy defaults.
+- **Reset:** one click restores every app to Omarchy defaults. This also
+  restores Omarchy’s browser policy; choose **Native** for browsers afterward if
+  you want to keep them unmanaged.
 - **Bar widget:** click the brush icon to change an app, pick a theme, or reset.
 
 ## Install
@@ -52,17 +52,17 @@ that installs:
 You can also run the setup from a terminal:
 
 ```sh
-~/Projects/omarchy-app-theme/bin/install-privileged.sh   # with sudo/pkexec
+pkexec ~/.config/omarchy/plugins/io.github.anishvarsha.app-theme/bin/install-privileged.sh
 ```
 
 ### Optional command line
 
-The widget and theme hook work without installing anything else. To get the
+The widget installs the theme hook automatically, so nothing else is required
+for per-app themes to survive theme switches. To also get the
 `omarchy-app-theme` command:
 
 ```sh
 ln -s ~/.config/omarchy/plugins/io.github.anishvarsha.app-theme/bin/omarchy-app-theme ~/.local/bin/omarchy-app-theme
-omarchy-app-theme install-hook
 ```
 
 ## Use
